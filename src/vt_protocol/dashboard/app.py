@@ -427,6 +427,266 @@ async def api_audit(
     }
 
 
+@app.get("/api/blast-radius/{decision_id}")
+async def api_blast_radius(decision_id: str) -> dict[str, Any]:
+    """Blast radius for a decision — what's affected if it changes.
+
+    Returns:
+      - Directly related decisions (shared dimensions)
+      - Contradictions involving this decision
+      - Dependent decisions (those that supersede or are superseded by)
+      - Estimated impact score (0.0-1.0)
+    """
+    state = get_state()
+    try:
+        uid = UUID(decision_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    target = None
+    for d in state.decisions:
+        if d.id == uid:
+            target = d
+            break
+
+    if target is None:
+        raise HTTPException(404, "Decision not found")
+
+    # Find directly related decisions (shared dimensions)
+    related: list[dict[str, Any]] = []
+    for d in state.decisions:
+        if d.id == uid or not d.valid:
+            continue
+        shared = set(target.dimensions) & set(d.dimensions)
+        if shared:
+            related.append({
+                "id": str(d.id),
+                "title": d.title,
+                "shared_dimensions": [dim.value for dim in shared],
+                "relationship": "shared_dimension",
+            })
+
+    # Find contradictions involving this decision
+    affected_contradictions: list[dict[str, Any]] = []
+    for c in state.contradictions:
+        if c.decision_a_id == uid or c.decision_b_id == uid:
+            other_id = c.decision_b_id if c.decision_a_id == uid else c.decision_a_id
+            other_title = c.decision_b_title if c.decision_a_id == uid else c.decision_a_title
+            affected_contradictions.append({
+                "id": str(c.id),
+                "other_decision_id": str(other_id),
+                "other_decision_title": other_title,
+                "verdict": c.verdict.value,
+                "status": c.status.value,
+            })
+
+    # Find supersession chain
+    chain: list[dict[str, Any]] = []
+    for d in state.decisions:
+        if d.supersedes == uid:
+            chain.append({
+                "id": str(d.id),
+                "title": d.title,
+                "relationship": "superseded_by",
+            })
+    if target.supersedes:
+        for d in state.decisions:
+            if d.id == target.supersedes:
+                chain.append({
+                    "id": str(d.id),
+                    "title": d.title,
+                    "relationship": "supersedes",
+                })
+
+    # Impact score: proportion of project affected
+    total_active = max(len([d for d in state.decisions if d.valid]), 1)
+    impacted_count = len(related) + len(chain)
+    impact_score = min(1.0, impacted_count / total_active)
+
+    # Build Cytoscape graph for blast-radius visualization
+    nodes = [{
+        "data": {
+            "id": str(target.id),
+            "label": target.title[:50],
+            "type": "center",
+            "dimensions": [dim.value for dim in target.dimensions],
+        }
+    }]
+    edges = []
+
+    for r in related:
+        nodes.append({
+            "data": {
+                "id": r["id"],
+                "label": r["title"][:50],
+                "type": "related",
+                "dimensions": r["shared_dimensions"],
+            }
+        })
+        edges.append({
+            "data": {
+                "id": f"shared-{r['id']}",
+                "source": str(target.id),
+                "target": r["id"],
+                "type": "SHARED_DIMENSION",
+            }
+        })
+
+    for c in affected_contradictions:
+        if not any(n["data"]["id"] == c["other_decision_id"] for n in nodes):
+            nodes.append({
+                "data": {
+                    "id": c["other_decision_id"],
+                    "label": c["other_decision_title"][:50],
+                    "type": "contradicting",
+                }
+            })
+        edges.append({
+            "data": {
+                "id": f"contra-{c['id']}",
+                "source": str(target.id),
+                "target": c["other_decision_id"],
+                "type": c["verdict"].upper(),
+            }
+        })
+
+    for ch in chain:
+        if not any(n["data"]["id"] == ch["id"] for n in nodes):
+            nodes.append({
+                "data": {
+                    "id": ch["id"],
+                    "label": ch["title"][:50],
+                    "type": ch["relationship"],
+                }
+            })
+        edges.append({
+            "data": {
+                "id": f"chain-{ch['id']}",
+                "source": str(target.id),
+                "target": ch["id"],
+                "type": "SUPERSEDES",
+            }
+        })
+
+    return {
+        "decision": _serialize_decision(target),
+        "related_decisions": related,
+        "contradictions": affected_contradictions,
+        "supersession_chain": chain,
+        "impact_score": round(impact_score, 3),
+        "total_affected": impacted_count + len(affected_contradictions),
+        "graph": {"nodes": nodes, "edges": edges},
+    }
+
+
+@app.get("/api/contradictions/{contradiction_id}/resolution-paths")
+async def api_resolution_paths(contradiction_id: str) -> dict[str, Any]:
+    """Suggest resolution paths for a contradiction.
+
+    Returns 2-3 actionable resolution options (CodeRabbit-style).
+    """
+    from vt_protocol.decisions.resolution import suggest_resolution_paths
+
+    state = get_state()
+    try:
+        uid = UUID(contradiction_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    target_c = None
+    for c in state.contradictions:
+        if c.id == uid:
+            target_c = c
+            break
+
+    if target_c is None:
+        raise HTTPException(404, "Contradiction not found")
+
+    # Find the actual decisions for richer path descriptions
+    da = next((d for d in state.decisions if d.id == target_c.decision_a_id), None)
+    db = next((d for d in state.decisions if d.id == target_c.decision_b_id), None)
+
+    paths = suggest_resolution_paths(target_c, da, db)
+    return {
+        "contradiction_id": str(uid),
+        "paths": [p.to_dict() for p in paths],
+    }
+
+
+@app.post("/api/contradictions/{contradiction_id}/apply-resolution")
+async def api_apply_resolution(
+    contradiction_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply a resolution action from suggested paths.
+
+    Body: {action: str, rationale: str}
+    """
+    from vt_protocol.decisions.resolution import apply_resolution
+
+    state = get_state()
+    try:
+        uid = UUID(contradiction_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    target_c = None
+    for c in state.contradictions:
+        if c.id == uid:
+            target_c = c
+            break
+
+    if target_c is None:
+        raise HTTPException(404, "Contradiction not found")
+
+    action = body.get("action", "")
+    rationale = body.get("rationale", "")
+
+    result = apply_resolution(
+        target_c,
+        action,
+        rationale=rationale,
+        decisions=state.decisions,
+    )
+
+    # Persist changes
+    _save_contradiction(state.project_root, target_c)
+
+    # Broadcast to WebSocket clients
+    await state.broadcast("contradiction_resolved", {
+        "id": str(uid),
+        "action": action,
+        "result": result,
+    })
+
+    return {"id": str(uid), **result}
+
+
+@app.get("/api/calibration")
+async def api_calibration() -> dict[str, Any]:
+    """LLM judge calibration metrics (IRT-based).
+
+    Returns ECE, Brier score, Wasserstein distance, accuracy, and drift.
+    """
+    state = get_state()
+    calibration_db = state.project_root / ".smm" / "calibration.db"
+
+    if not calibration_db.exists():
+        return {
+            "metrics": None,
+            "message": "No calibration data yet. Resolve contradictions to build calibration history.",
+        }
+
+    from vt_protocol.decisions.calibration import CalibrationStore
+
+    store = CalibrationStore(calibration_db, check_same_thread=False)
+    try:
+        metrics = store.compute_metrics()
+        return {"metrics": metrics.to_dict()}
+    finally:
+        store.close()
+
+
 @app.get("/api/sessions")
 async def api_sessions() -> dict[str, Any]:
     """Recent agent sessions with decisions captured."""

@@ -166,7 +166,7 @@ class TestCheckContradictionWithVoting:
         d_b = _make_decision("B")
         low_conf = _make_llm_result("contradiction", 0.3)
 
-        with patch("vt_protocol.decisions.contradiction.nli_score", return_value=0.8):
+        with patch("vt_protocol.decisions.contradiction.nli_distribution", return_value=MagicMock(contradiction=0.8)):
             with patch("vt_protocol.decisions.contradiction.llm_check", return_value=low_conf) as mock_llm:
                 result = check_contradiction(
                     d_a, d_b,
@@ -184,7 +184,7 @@ class TestCheckContradictionWithVoting:
         initial = _make_llm_result("contradiction", 0.4)
         vote = _make_llm_result("contradiction", 0.6)
 
-        with patch("vt_protocol.decisions.contradiction.nli_score", return_value=0.8):
+        with patch("vt_protocol.decisions.contradiction.nli_distribution", return_value=MagicMock(contradiction=0.8)):
             with patch("vt_protocol.decisions.contradiction.llm_check", side_effect=[initial, vote, vote, vote]) as mock_llm:
                 result = check_contradiction(d_a, d_b, api_key="test-key")
                 assert result is not None
@@ -197,7 +197,7 @@ class TestCheckContradictionWithVoting:
         d_b = _make_decision("B")
         high_conf = _make_llm_result("contradiction", 0.85)
 
-        with patch("vt_protocol.decisions.contradiction.nli_score", return_value=0.8):
+        with patch("vt_protocol.decisions.contradiction.nli_distribution", return_value=MagicMock(contradiction=0.8)):
             with patch("vt_protocol.decisions.contradiction.llm_check", return_value=high_conf) as mock_llm:
                 result = check_contradiction(d_a, d_b, api_key="test-key")
                 assert result is not None

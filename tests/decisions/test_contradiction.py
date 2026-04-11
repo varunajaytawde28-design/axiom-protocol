@@ -155,17 +155,19 @@ class TestCheckContradiction:
         )
         assert result is None
 
-    @patch("vt_protocol.decisions.contradiction.nli_score")
+    @patch("vt_protocol.decisions.contradiction.nli_distribution")
     def test_low_nli_skips_llm(self, mock_nli, decision_pg, decision_sqlite) -> None:
-        mock_nli.return_value = 0.1  # Below NLI_THRESHOLD
+        from vt_protocol.decisions.contradiction import NLIDistribution
+        mock_nli.return_value = NLIDistribution(contradiction=0.1, entailment=0.7, neutral=0.2)
         result = check_contradiction(decision_pg, decision_sqlite, skip_llm=True)
         assert result is None
         mock_nli.assert_called_once()
 
     @patch("vt_protocol.decisions.contradiction.llm_check")
-    @patch("vt_protocol.decisions.contradiction.nli_score")
+    @patch("vt_protocol.decisions.contradiction.nli_distribution")
     def test_high_nli_proceeds_to_llm(self, mock_nli, mock_llm, decision_pg, decision_sqlite) -> None:
-        mock_nli.return_value = 0.8  # Above threshold
+        from vt_protocol.decisions.contradiction import NLIDistribution
+        mock_nli.return_value = NLIDistribution(contradiction=0.8, entailment=0.1, neutral=0.1)
         mock_llm.return_value = {
             "reasoning": "Contradictory databases",
             "verdict": "contradiction",
@@ -219,7 +221,7 @@ class TestCheckContradiction:
         assert result is not None
         assert Dimension.DATABASE in result.shared_dimensions
 
-    @patch("vt_protocol.decisions.contradiction.nli_score")
+    @patch("vt_protocol.decisions.contradiction.nli_distribution")
     def test_nli_none_proceeds_to_llm(self, mock_nli, decision_pg, decision_sqlite) -> None:
         mock_nli.return_value = None  # Transformers not installed
         # With skip_llm=True, should return None (but NLI didn't filter)

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any
 
 from vt_protocol.decisions.models import (
@@ -47,6 +48,57 @@ VOTING_ROUNDS = 3
 
 # Temperature for voting calls (higher for diversity)
 VOTING_TEMPERATURE = 0.7
+
+@dataclass
+class NLIDistribution:
+    """Full softmax distribution from NLI cross-encoder.
+
+    Instead of a hard 0.3 cutoff, the full distribution allows:
+    - Passing soft labels to LLM context for nuanced judgment
+    - Graceful degradation for vague/ambiguous constraints
+    - Better calibration by preserving uncertainty information
+
+    From Madaan et al. 2025: "Full softmax distribution instead of hard
+    threshold enables graceful degradation for vague constraints."
+    """
+
+    contradiction: float = 0.0
+    entailment: float = 0.0
+    neutral: float = 0.0
+
+    @property
+    def dominant_label(self) -> str:
+        """Return the label with highest probability."""
+        labels = {
+            "contradiction": self.contradiction,
+            "entailment": self.entailment,
+            "neutral": self.neutral,
+        }
+        return max(labels, key=labels.get)  # type: ignore[arg-type]
+
+    @property
+    def entropy(self) -> float:
+        """Shannon entropy of the distribution — high = uncertain."""
+        import math
+
+        total = 0.0
+        for p in (self.contradiction, self.entailment, self.neutral):
+            if p > 0:
+                total -= p * math.log2(p)
+        return total
+
+    @property
+    def is_ambiguous(self) -> bool:
+        """True if no label has >0.5 probability — highly uncertain."""
+        return max(self.contradiction, self.entailment, self.neutral) < 0.5
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "contradiction": round(self.contradiction, 4),
+            "entailment": round(self.entailment, 4),
+            "neutral": round(self.neutral, 4),
+        }
+
 
 _SYSTEM_PROMPT = """\
 You are an architectural decision contradiction detector. You compare two \
@@ -79,6 +131,24 @@ Shared dimensions: {dimensions}
 
 Are these decisions contradictory, in tension, or compatible?"""
 
+_USER_TEMPLATE_WITH_NLI = """\
+Decision A: "{title_a}"
+{content_a}
+
+Decision B: "{title_b}"
+{content_b}
+
+Shared dimensions: {dimensions}
+
+NLI pre-analysis (automated):
+  Contradiction probability: {nli_contradiction:.1%}
+  Entailment probability: {nli_entailment:.1%}
+  Neutral probability: {nli_neutral:.1%}
+  Note: {nli_note}
+
+Use the NLI pre-analysis as a signal, but make your own independent judgment.
+Are these decisions contradictory, in tension, or compatible?"""
+
 
 # ---------------------------------------------------------------------------
 # Stage 1: NLI cross-encoder pre-filter
@@ -93,6 +163,21 @@ def nli_score(text_a: str, text_b: str) -> float | None:
 
     Uses cross-encoder/nli-deberta-v3-base.
     """
+    dist = nli_distribution(text_a, text_b)
+    if dist is None:
+        return None
+    return dist.contradiction
+
+
+def nli_distribution(text_a: str, text_b: str) -> NLIDistribution | None:
+    """Compute full NLI softmax distribution using cross-encoder.
+
+    Returns NLIDistribution with contradiction, entailment, neutral
+    probabilities, or None if the model is not available.
+
+    From Madaan et al. 2025: full distribution instead of hard cutoff
+    enables graceful degradation for vague constraints.
+    """
     try:
         from sentence_transformers import CrossEncoder
     except ImportError:
@@ -103,8 +188,11 @@ def nli_score(text_a: str, text_b: str) -> float | None:
         model = _get_nli_model()
         # CrossEncoder.predict returns [contradiction, entailment, neutral]
         scores = model.predict([(text_a, text_b)])
-        # scores shape: (1, 3) — take contradiction probability
-        return float(scores[0][0])
+        return NLIDistribution(
+            contradiction=float(scores[0][0]),
+            entailment=float(scores[0][1]),
+            neutral=float(scores[0][2]),
+        )
     except Exception:
         logger.exception("NLI scoring failed")
         return None
@@ -141,11 +229,15 @@ def llm_check(
     model: str = DEFAULT_MODEL,
     api_key: str | None = None,
     temperature: float | None = None,
+    nli_distribution: NLIDistribution | None = None,
 ) -> dict[str, Any] | None:
     """Call Claude for structured contradiction judgment.
 
     Returns parsed JSON dict with reasoning, verdict, confidence, evidence_a,
     evidence_b. Returns None if the API key is missing or the call fails.
+
+    When nli_distribution is provided, soft labels are included in the prompt
+    to give the LLM additional context (Madaan et al. 2025).
     """
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key:
@@ -160,13 +252,34 @@ def llm_check(
 
     client = anthropic.Anthropic(api_key=key)
 
-    user_msg = _USER_TEMPLATE.format(
-        title_a=decision_a.title,
-        content_a=decision_a.content,
-        title_b=decision_b.title,
-        content_b=decision_b.content,
-        dimensions=", ".join(d.value for d in shared_dimensions) or "none",
-    )
+    dims_str = ", ".join(d.value for d in shared_dimensions) or "none"
+
+    # Use soft-label template when NLI distribution is available
+    if nli_distribution is not None:
+        nli_note = (
+            "High uncertainty — consider both possibilities"
+            if nli_distribution.is_ambiguous
+            else f"Dominant signal: {nli_distribution.dominant_label}"
+        )
+        user_msg = _USER_TEMPLATE_WITH_NLI.format(
+            title_a=decision_a.title,
+            content_a=decision_a.content,
+            title_b=decision_b.title,
+            content_b=decision_b.content,
+            dimensions=dims_str,
+            nli_contradiction=nli_distribution.contradiction,
+            nli_entailment=nli_distribution.entailment,
+            nli_neutral=nli_distribution.neutral,
+            nli_note=nli_note,
+        )
+    else:
+        user_msg = _USER_TEMPLATE.format(
+            title_a=decision_a.title,
+            content_a=decision_a.content,
+            title_b=decision_b.title,
+            content_b=decision_b.content,
+            dimensions=dims_str,
+        )
 
     try:
         kwargs: dict[str, Any] = {
@@ -233,7 +346,8 @@ def check_contradiction(
     Stage 1 (NLI): If available and score < NLI_THRESHOLD, return None
         (assumed compatible, no LLM call needed).
     Stage 2 (LLM): Get structured judgment with reasoning, verdict,
-        evidence citations.
+        evidence citations. NLI soft labels are passed to the LLM
+        when available (Madaan et al. 2025).
 
     Returns a Contradiction model if a contradiction or tension is detected,
     or None if the decisions are compatible.
@@ -244,25 +358,28 @@ def check_contradiction(
     """
     shared_dims = list(set(decision_a.dimensions) & set(decision_b.dimensions))
 
-    # Stage 1: NLI pre-filter
+    # Stage 1: NLI pre-filter with soft labels
+    nli_dist: NLIDistribution | None = None
     if not skip_nli:
         text_a = f"{decision_a.title}. {decision_a.content}"
         text_b = f"{decision_b.title}. {decision_b.content}"
-        score = nli_score(text_a, text_b)
-        if score is not None and score < NLI_THRESHOLD:
+        nli_dist = nli_distribution(text_a, text_b)
+        if nli_dist is not None and nli_dist.contradiction < NLI_THRESHOLD:
             logger.debug(
                 "NLI score %.3f < %.3f for (%s, %s) — skipping LLM",
-                score, NLI_THRESHOLD, decision_a.title, decision_b.title,
+                nli_dist.contradiction, NLI_THRESHOLD,
+                decision_a.title, decision_b.title,
             )
             return None
 
-    # Stage 2: LLM judgment
+    # Stage 2: LLM judgment (with soft NLI labels when available)
     if skip_llm:
         return None
 
     result = llm_check(
         decision_a, decision_b, shared_dims,
         model=model, api_key=api_key,
+        nli_distribution=nli_dist,
     )
     if result is None:
         return None

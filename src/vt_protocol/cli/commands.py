@@ -285,6 +285,84 @@ def serve(stdio: bool, host: str, port: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# vt gate
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--path", type=click.Path(exists=True), default=".", help="Project root path")
+@click.option("--json-output", "json_out", is_flag=True, help="Output as JSON")
+def gate(path: str, json_out: bool) -> None:
+    """Run architecture quality gates — binary pass/fail for CI.
+
+    Two conditions:
+      1. No new unresolved contradictions (above baseline)
+      2. All new decisions have required metadata (title, dimensions, rationale)
+
+    Exit code 0 = pass, 1 = fail.
+    """
+    from vt_protocol.config import find_project_root, load_governance_config
+    from vt_protocol.decisions.quality_gate import run_quality_gate
+
+    root = Path(path).resolve()
+    try:
+        root = find_project_root(root)
+    except FileNotFoundError:
+        click.echo("Error: not a VT Protocol project. Run 'vt init' first.")
+        sys.exit(1)
+
+    config = load_governance_config(root)
+    decisions = _load_local_decisions(root)
+    contradictions = _load_local_contradictions(root)
+
+    result = run_quality_gate(
+        decisions,
+        contradictions,
+        require_rationale=True,
+        require_dimensions=True,
+    )
+
+    if json_out:
+        output = {
+            "passed": result.passed,
+            "checks_run": result.checks_run,
+            "checks_passed": result.checks_passed,
+            "errors": [
+                {"rule": v.rule, "message": v.message, "details": v.details}
+                for v in result.errors
+            ],
+            "warnings": [
+                {"rule": v.rule, "message": v.message, "details": v.details}
+                for v in result.warnings
+            ],
+        }
+        click.echo(json.dumps(output, indent=2))
+    else:
+        click.echo("# VT Protocol — Quality Gate")
+        click.echo("")
+        click.echo(f"Checks: {result.checks_passed}/{result.checks_run} passed")
+        click.echo("")
+
+        if result.errors:
+            click.echo("## Errors (blocking)")
+            for v in result.errors:
+                click.echo(f"  ✗ [{v.rule}] {v.message}")
+            click.echo("")
+
+        if result.warnings:
+            click.echo("## Warnings")
+            for v in result.warnings:
+                click.echo(f"  ⚠ [{v.rule}] {v.message}")
+            click.echo("")
+
+        status = "PASS" if result.passed else "FAIL"
+        click.echo(f"**Result: {status}**")
+
+    if not result.passed:
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # vt audit-commit (internal — called by post-commit hook)
 # ---------------------------------------------------------------------------
 
