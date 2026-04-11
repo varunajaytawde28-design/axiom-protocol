@@ -1,0 +1,68 @@
+version: "3.8"
+
+services:
+  # PostgreSQL — decision graph backing store
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vt_protocol
+      POSTGRES_USER: vt
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vt_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vt -d vt_protocol"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # FalkorDB — optional graph database (Redis-compatible)
+  falkordb:
+    image: falkordb/falkordb:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - falkordata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    profiles:
+      - graph  # Only started with --profile graph
+
+  # VT Protocol server — FastAPI dashboard + MCP server
+  vt-protocol:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "7842:7842"   # Dashboard
+      - "8080:8080"   # MCP HTTP transport
+    environment:
+      DATABASE_URL: postgresql://vt:${POSTGRES_PASSWORD:-vt_dev_password}@postgres:5432/vt_protocol
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_PRIVATE_KEY: ${GITHUB_PRIVATE_KEY:-}
+      VT_SMM_DIR: /app/.smm
+    volumes:
+      - smmdata:/app/.smm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7842/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  falkordata:
+  smmdata:

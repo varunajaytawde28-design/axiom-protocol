@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VT Protocol Dashboard</title>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --bg-card: #111118;
+  --bg-surface: #1a1a24;
+  --border: #2a2a3a;
+  --text: #e4e4ef;
+  --text-muted: #8888a0;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --radius: 8px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+/* Layout */
+.app { display: flex; height: 100vh; }
+.sidebar { width: 220px; background: var(--bg-card); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; display: flex; flex-direction: column; }
+.sidebar-logo { padding: 0 16px 16px; font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+.sidebar-logo span { color: var(--text-muted); font-weight: 400; font-size: 12px; display: block; margin-top: 2px; }
+.nav-item { padding: 8px 16px; cursor: pointer; font-size: 13px; color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 8px; }
+.nav-item:hover { background: var(--bg-surface); color: var(--text); }
+.nav-item.active { color: var(--accent); background: rgba(99,102,241,0.08); border-right: 2px solid var(--accent); }
+.nav-item .icon { width: 16px; text-align: center; }
+.main { flex: 1; overflow-y: auto; padding: 24px 32px; }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; }
+.card-value { font-size: 28px; font-weight: 700; }
+.card-value.green { color: var(--green); }
+.card-value.red { color: var(--red); }
+.card-value.amber { color: var(--amber); }
+.card-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.status-badge.pass { background: rgba(34,197,94,0.15); color: var(--green); }
+.status-badge.fail { background: rgba(239,68,68,0.15); color: var(--red); }
+.status-badge.degraded { background: rgba(245,158,11,0.15); color: var(--amber); }
+
+/* Tables */
+.table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 10px 14px; background: var(--bg-surface); color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(99,102,241,0.04); }
+
+/* Dimension tags */
+.dim-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-right: 3px; background: rgba(99,102,241,0.12); color: var(--accent); }
+
+/* Contradiction cards */
+.contra-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.contra-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.contra-verdict { font-weight: 700; text-transform: uppercase; font-size: 12px; }
+.contra-verdict.contradiction { color: var(--red); }
+.contra-verdict.tension { color: var(--amber); }
+.contra-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.contra-side { padding: 10px; background: var(--bg-surface); border-radius: 6px; }
+.contra-side h4 { font-size: 13px; margin-bottom: 4px; }
+.contra-side p { font-size: 12px; color: var(--text-muted); }
+.contra-reasoning { font-size: 12px; color: var(--text-muted); padding: 8px; background: var(--bg-surface); border-radius: 6px; margin-bottom: 10px; }
+.contra-actions { display: flex; gap: 8px; }
+
+/* Buttons */
+.btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: all 0.15s; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.danger { border-color: var(--red); color: var(--red); }
+
+/* Graph container */
+#graph-container { width: 100%; height: calc(100vh - 120px); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* Audit entries */
+.audit-entry { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.audit-entry:last-child { border-bottom: none; }
+.audit-time { font-family: var(--mono); font-size: 11px; color: var(--text-muted); min-width: 160px; }
+.audit-type { font-weight: 600; min-width: 160px; }
+.audit-verify { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+.audit-verify.verified { background: rgba(34,197,94,0.15); color: var(--green); }
+.audit-verify.failed { background: rgba(239,68,68,0.15); color: var(--red); }
+
+/* Detail panel */
+.detail-panel { position: fixed; right: 0; top: 0; width: 400px; height: 100vh; background: var(--bg-card); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; transform: translateX(100%); transition: transform 0.2s; z-index: 100; }
+.detail-panel.open { transform: translateX(0); }
+.detail-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px; }
+.detail-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; padding-right: 30px; }
+.detail-section { margin-bottom: 14px; }
+.detail-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 4px; }
+.detail-text { font-size: 13px; line-height: 1.5; }
+
+/* Command palette */
+.cmd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+.cmd-overlay.open { display: flex; }
+.cmd-box { width: 500px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.cmd-input { width: 100%; padding: 14px 16px; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; border-bottom: 1px solid var(--border); }
+.cmd-results { max-height: 300px; overflow-y: auto; }
+.cmd-item { padding: 10px 16px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; }
+.cmd-item:hover, .cmd-item.selected { background: rgba(99,102,241,0.1); }
+.cmd-shortcut { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+
+/* Page titles */
+.page-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sidebar { width: 60px; }
+  .sidebar-logo span, .nav-item span:not(.icon) { display: none; }
+  .main { padding: 16px; }
+  .cards { grid-template-columns: repeat(2, 1fr); }
+  .contra-sides { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar">
+    <div class="sidebar-logo">VT Protocol<span>Architecture Governance</span></div>
+    <div class="nav-item active" data-page="overview"><span class="icon">&#9776;</span> <span>Overview</span></div>
+    <div class="nav-item" data-page="graph"><span class="icon">&#9670;</span> <span>Decision Graph</span></div>
+    <div class="nav-item" data-page="contradictions"><span class="icon">&#9888;</span> <span>Contradictions</span></div>
+    <div class="nav-item" data-page="audit"><span class="icon">&#9875;</span> <span>Audit Trail</span></div>
+  </nav>
+  <main class="main" id="main-content"></main>
+</div>
+
+<!-- Detail panel -->
+<div class="detail-panel" id="detail-panel">
+  <button class="detail-close" onclick="closeDetail()">&times;</button>
+  <div id="detail-content"></div>
+</div>
+
+<!-- Command palette -->
+<div class="cmd-overlay" id="cmd-overlay">
+  <div class="cmd-box">
+    <input class="cmd-input" id="cmd-input" placeholder="Type a command..." autocomplete="off">
+    <div class="cmd-results" id="cmd-results"></div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentPage = 'overview';
+let ws = null;
+
+// --- Navigation ---
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    item.classList.add('active');
+    currentPage = item.dataset.page;
+    loadPage(currentPage);
+  });
+});
+
+function loadPage(page) {
+  const main = document.getElementById('main-content');
+  closeDetail();
+  switch(page) {
+    case 'overview': loadOverview(main); break;
+    case 'graph': loadGraph(main); break;
+    case 'contradictions': loadContradictions(main); break;
+    case 'audit': loadAudit(main); break;
+  }
+}
+
+// --- Overview ---
+async function loadOverview(el) {
+  el.innerHTML = '<div class="page-title">Overview</div><div class="cards" id="health-cards"></div><div class="page-title" style="font-size:16px">Recent Decisions</div><div class="table-wrap"><table id="decisions-table"><thead><tr><th>Title</th><th>Type</th><th>Dimensions</th><th>Confidence</th><th>Created</th></tr></thead><tbody></tbody></table></div>';
+  try {
+    const [health, decisions] = await Promise.all([
+      fetch(API + '/api/health').then(r => r.json()),
+      fetch(API + '/api/decisions?limit=20').then(r => r.json())
+    ]);
+    renderHealthCards(health);
+    renderDecisionsTable(decisions.decisions);
+  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load data: ' + e.message + '</p>'; }
+}
+
+function renderHealthCards(h) {
+  const cards = document.getElementById('health-cards');
+  const statusCls = h.status === 'healthy' ? 'pass' : 'degraded';
+  const coherenceCls = h.coherence_score >= 0.8 ? 'green' : h.coherence_score >= 0.5 ? 'amber' : 'red';
+  cards.innerHTML = `
+    <div class="card"><div class="card-label">Status</div><span class="status-badge ${statusCls}">${h.status.toUpperCase()}</span></div>
+    <div class="card"><div class="card-label">Coherence</div><div class="card-value ${coherenceCls}">${Math.round(h.coherence_score * 100)}%</div></div>
+    <div class="card"><div class="card-label">Decisions</div><div class="card-value">${h.active_decisions}</div><div class="card-sub">${h.total_decisions} total</div></div>
+    <div class="card"><div class="card-label">Contradictions</div><div class="card-value ${h.actionable_contradictions > 0 ? 'red' : 'green'}">${h.actionable_contradictions}</div><div class="card-sub">actionable</div></div>
+    <div class="card"><div class="card-label">Audit Entries</div><div class="card-value">${h.audit_entries}</div></div>
+  `;
+}
+
+function renderDecisionsTable(decisions) {
+  const tbody = document.querySelector('#decisions-table tbody');
+  tbody.innerHTML = decisions.map(d => `
+    <tr style="cursor:pointer" onclick="showDecision('${d.id}')">
+      <td>${esc(d.title)}</td>
+      <td>${d.decision_type}</td>
+      <td>${d.dimensions.map(dim => '<span class="dim-tag">' + dim + '</span>').join('')}</td>
+      <td>${Math.round(d.confidence * 100)}%</td>
+      <td>${new Date(d.created_at).toLocaleDateString()}</td>
+    </tr>
+  `).join('');
+}
+
+// --- Decision Detail ---
+async function showDecision(id) {
+  try {
+    const d = await fetch(API + '/api/decisions/' + id).then(r => r.json());
+    const panel = document.getElementById('detail-panel');
+    document.getElementById('detail-content').innerHTML = `
+      <div class="detail-title">${esc(d.title)}</div>
+      <div class="detail-section"><div class="detail-label">Type</div><div class="detail-text">${d.decision_type}</div></div>
+      <div class="detail-section"><div class="detail-label">Dimensions</div><div class="detail-text">${d.dimensions.map(dim => '<span class="dim-tag">' + dim + '</span>').join(' ')}</div></div>
+      <div class="detail-section"><div class="detail-label">Content</div><div class="detail-text">${esc(d.content)}</div></div>
+      <div class="detail-section"><div class="detail-label">Rationale</div><div class="detail-text">${esc(d.rationale || 'None')}</div></div>
+      <div class="detail-section"><div class="detail-label">Confidence</div><div class="detail-text">${Math.round(d.confidence * 100)}%</div></div>
+      <div class="detail-section"><div class="detail-label">Source</div><div class="detail-text">${d.source_type} / ${d.made_by}</div></div>
+      ${d.alternatives && d.alternatives.length ? '<div class="detail-section"><div class="detail-label">Alternatives</div><div class="detail-text">' + d.alternatives.join(', ') + '</div></div>' : ''}
+      ${d.related_contradictions && d.related_contradictions.length ? '<div class="detail-section"><div class="detail-label">Related Contradictions</div>' + d.related_contradictions.map(c => '<div class="contra-card" style="margin-top:6px"><span class="contra-verdict ' + c.verdict + '">' + c.verdict + '</span> vs ' + esc(c.decision_a_title === d.title ? c.decision_b_title : c.decision_a_title) + '</div>').join('') + '</div>' : ''}
+    `;
+    panel.classList.add('open');
+  } catch(e) { console.error(e); }
+}
+
+function closeDetail() { document.getElementById('detail-panel').classList.remove('open'); }
+
+// --- Graph ---
+async function loadGraph(el) {
+  el.innerHTML = '<div class="page-title">Decision Graph</div><div id="graph-container"></div>';
+  try {
+    const data = await fetch(API + '/api/graph').then(r => r.json());
+    renderGraph(data);
+  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load graph</p>'; }
+}
+
+const DIM_COLORS = {
+  database: '#6366f1', auth: '#ec4899', caching: '#f59e0b', api_style: '#22c55e',
+  deployment: '#3b82f6', concurrency: '#a855f7', logging: '#64748b', testing: '#14b8a6',
+  error_handling: '#f87171', state_management: '#fb923c', messaging: '#38bdf8', security: '#ef4444'
+};
+
+function renderGraph(data) {
+  const elements = [];
+  data.nodes.forEach(n => {
+    const dim = n.data.dimensions[0] || 'database';
+    elements.push({ data: { ...n.data, color: DIM_COLORS[dim] || '#6366f1' } });
+  });
+  data.edges.forEach(e => {
+    const color = e.data.type === 'CONTRADICTION' ? '#ef4444' : e.data.type === 'TENSION' ? '#f59e0b' : e.data.type === 'SUPERSEDES' ? '#8888a0' : '#2a2a3a';
+    elements.push({ data: { ...e.data, color } });
+  });
+  const cy = cytoscape({
+    container: document.getElementById('graph-container'),
+    elements,
+    style: [
+      { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': '#e4e4ef', 'text-outline-color': '#0a0a0f', 'text-outline-width': 2, 'width': 30, 'height': 30 } },
+      { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 1.5, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.7 } },
+      { selector: 'edge[type="SHARED_DIMENSION"]', style: { 'target-arrow-shape': 'none', 'line-style': 'dotted', 'width': 1, 'opacity': 0.4 } }
+    ],
+    layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, idealEdgeLength: 120 }
+  });
+  cy.on('tap', 'node', e => showDecision(e.target.data('id')));
+}
+
+// --- Contradictions ---
+async function loadContradictions(el) {
+  el.innerHTML = '<div class="page-title">Contradictions</div><div id="contra-list"></div>';
+  try {
+    const data = await fetch(API + '/api/contradictions').then(r => r.json());
+    renderContradictions(data.contradictions);
+  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load contradictions</p>'; }
+}
+
+function renderContradictions(contras) {
+  const list = document.getElementById('contra-list');
+  if (!contras.length) { list.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:var(--green)">No unresolved contradictions. Architecture is clean.</div>'; return; }
+  list.innerHTML = contras.map(c => `
+    <div class="contra-card">
+      <div class="contra-header">
+        <span class="contra-verdict ${c.verdict}">${c.verdict.toUpperCase()}</span>
+        <span style="font-size:12px;color:var(--text-muted)">Confidence: ${Math.round(c.confidence * 100)}%</span>
+      </div>
+      <div class="contra-sides">
+        <div class="contra-side"><h4>${esc(c.decision_a_title)}</h4><p>${esc(c.evidence_a)}</p></div>
+        <div class="contra-side"><h4>${esc(c.decision_b_title)}</h4><p>${esc(c.evidence_b)}</p></div>
+      </div>
+      <div class="contra-reasoning">${esc(c.reasoning)}</div>
+      <div class="contra-actions">
+        <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_a_id}','Pick A')">Pick A</button>
+        <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_b_id}','Pick B')">Pick B</button>
+        <button class="btn danger" onclick="resolveContra('${c.id}','dismiss','Dismissed')">Dismiss</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function resolveContra(id, winnerId, rationale) {
+  try {
+    await fetch(API + '/api/contradictions/' + id + '/resolve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ winner_id: winnerId, rationale })
+    });
+    loadContradictions(document.getElementById('main-content'));
+  } catch(e) { alert('Failed to resolve: ' + e.message); }
+}
+
+// --- Audit ---
+async function loadAudit(el) {
+  el.innerHTML = '<div class="page-title">Audit Trail</div><div style="margin-bottom:12px"><button class="btn" onclick="loadAuditVerified()">Verify All Proofs</button></div><div class="table-wrap" id="audit-list"></div>';
+  try {
+    const data = await fetch(API + '/api/audit?limit=100').then(r => r.json());
+    renderAudit(data.entries);
+  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load audit trail</p>'; }
+}
+
+async function loadAuditVerified() {
+  try {
+    const data = await fetch(API + '/api/audit?limit=100&verify=true').then(r => r.json());
+    renderAudit(data.entries);
+  } catch(e) { console.error(e); }
+}
+
+function renderAudit(entries) {
+  const list = document.getElementById('audit-list');
+  if (!entries.length) { list.innerHTML = '<div style="padding:16px;color:var(--text-muted)">No audit entries yet.</div>'; return; }
+  list.innerHTML = entries.map(e => `
+    <div class="audit-entry">
+      <span class="audit-time">${new Date(e.timestamp).toLocaleString()}</span>
+      <span class="audit-type">${e.event_type}</span>
+      <span>${esc(e.actor)}</span>
+      <span style="flex:1;font-size:12px;color:var(--text-muted)">${esc(JSON.stringify(e.payload).slice(0, 80))}</span>
+      ${e.verified !== null ? '<span class="audit-verify ' + (e.verified ? 'verified' : 'failed') + '">' + (e.verified ? 'Verified' : 'Failed') + '</span>' : ''}
+    </div>
+  `).join('');
+}
+
+// --- Command Palette (Cmd+K) ---
+const commands = [
+  { label: 'Go to Overview', action: () => { navTo('overview'); }, shortcut: '1' },
+  { label: 'Go to Decision Graph', action: () => { navTo('graph'); }, shortcut: '2' },
+  { label: 'Go to Contradictions', action: () => { navTo('contradictions'); }, shortcut: '3' },
+  { label: 'Go to Audit Trail', action: () => { navTo('audit'); }, shortcut: '4' },
+  { label: 'Refresh Data', action: () => { loadPage(currentPage); closeCmdPalette(); }, shortcut: 'R' },
+];
+
+function navTo(page) {
+  document.querySelectorAll('.nav-item').forEach(i => {
+    i.classList.toggle('active', i.dataset.page === page);
+  });
+  currentPage = page;
+  loadPage(page);
+  closeCmdPalette();
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); toggleCmdPalette(); }
+  if (e.key === 'Escape') closeCmdPalette();
+});
+
+function toggleCmdPalette() {
+  const overlay = document.getElementById('cmd-overlay');
+  overlay.classList.toggle('open');
+  if (overlay.classList.contains('open')) {
+    document.getElementById('cmd-input').value = '';
+    document.getElementById('cmd-input').focus();
+    filterCommands('');
+  }
+}
+function closeCmdPalette() { document.getElementById('cmd-overlay').classList.remove('open'); }
+
+document.getElementById('cmd-input').addEventListener('input', e => filterCommands(e.target.value));
+document.getElementById('cmd-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const selected = document.querySelector('.cmd-item.selected') || document.querySelector('.cmd-item');
+    if (selected) selected.click();
+  }
+});
+document.getElementById('cmd-overlay').addEventListener('click', e => { if (e.target.id === 'cmd-overlay') closeCmdPalette(); });
+
+function filterCommands(query) {
+  const q = query.toLowerCase();
+  const filtered = commands.filter(c => c.label.toLowerCase().includes(q));
+  const results = document.getElementById('cmd-results');
+  results.innerHTML = filtered.map((c, i) => `
+    <div class="cmd-item${i === 0 ? ' selected' : ''}" onclick="(${c.action.toString()})()">
+      <span>${c.label}</span>
+      <span class="cmd-shortcut">${c.shortcut}</span>
+    </div>
+  `).join('');
+}
+
+// --- WebSocket ---
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host + '/ws');
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'contradiction_resolved' || msg.type === 'decision_added') {
+      loadPage(currentPage);
+    }
+  };
+  ws.onclose = () => setTimeout(connectWS, 3000);
+  ws.onerror = () => {};
+}
+
+// --- Helpers ---
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// --- Init ---
+loadPage('overview');
+try { connectWS(); } catch(e) {}
+</script>
+</body>
+</html>

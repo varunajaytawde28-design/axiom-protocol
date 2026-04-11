@@ -1,0 +1,34 @@
+version: "3.8"
+
+# Local development overrides — hot reload, debug ports, verbose logging
+
+services:
+  vt-protocol:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: >
+      python -m uvicorn vt_protocol.dashboard.app:app
+      --host 0.0.0.0 --port 7842 --reload
+      --reload-dir /app/src
+    volumes:
+      - ../src:/app/src:ro
+      - smmdata:/app/.smm
+    environment:
+      DATABASE_URL: postgresql://vt:${POSTGRES_PASSWORD:-vt_dev_password}@postgres:5432/vt_protocol
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_PRIVATE_KEY: ${GITHUB_PRIVATE_KEY:-}
+      LOG_LEVEL: DEBUG
+      VT_SMM_DIR: /app/.smm
+    ports:
+      - "7842:7842"
+      - "8080:8080"
+      - "5678:5678"  # debugpy remote debugging
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+volumes:
+  smmdata:
