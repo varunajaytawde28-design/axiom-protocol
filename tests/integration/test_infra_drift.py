@@ -99,5 +99,5 @@ class TestInfraDrift:
         (root / "requirements.txt").write_text("django>=4.2\npsycopg2>=2.9\n")
 
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp"])
+        result = runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0

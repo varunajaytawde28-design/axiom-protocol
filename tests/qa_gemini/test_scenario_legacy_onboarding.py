@@ -30,13 +30,13 @@ class TestDjangoLegacyOnboarding:
     def test_init_scans_django_project(self, django_project):
         """vt init on a Django project discovers inferred decisions."""
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "--path", str(django_project)])
+        result = runner.invoke(main, ["init", "--path", str(django_project), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
 
     def test_check_after_init_shows_decisions(self, django_project):
         """After init, vt check shows discovered decisions."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project)])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["check", "--path", str(django_project), "--json-output"])
         data = json.loads(result.output)
         # Should have discovered some decisions from scanning
@@ -45,7 +45,7 @@ class TestDjangoLegacyOnboarding:
     def test_gate_passes_clean_project(self, django_project):
         """Fresh init — no contradictions, gate passes."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project)])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["gate", "--path", str(django_project), "--json-output"])
         # With no contradictions, gate should pass (exit 0)
         assert result.exit_code == 0
@@ -64,13 +64,13 @@ class TestInfrastructureDetection:
     def test_init_scans_infra_files(self, infra_project):
         """vt init detects infrastructure patterns."""
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "--path", str(infra_project)])
+        result = runner.invoke(main, ["init", "--path", str(infra_project), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
 
     def test_check_infra_project(self, infra_project):
         """vt check runs without errors on infra project."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(infra_project)])
+        runner.invoke(main, ["init", "--path", str(infra_project), "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["check", "--path", str(infra_project), "--json-output"])
         data = json.loads(result.output)
         assert "status" in data

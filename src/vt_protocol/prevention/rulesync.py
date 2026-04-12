@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from vt_protocol.decisions.models import Decision, GovernanceConfig
+from vt_protocol.decisions.models import AgentConfig, Decision, Dimension, GovernanceConfig
 from vt_protocol.prevention.priority import ScoredDecision, assign_tiers
 from vt_protocol.prevention.providers.agents_md import generate_agents_md
 from vt_protocol.prevention.providers.claude import generate_claude_md, generate_claude_rules
@@ -78,8 +78,12 @@ def sync_rules(
     result.files_written.append(root_agents)
     logger.info("Generated AGENTS.md")
 
-    # Claude provider
-    if config.agents.get("claude", False):
+    # Determine which agent types are enabled (any agent with type=claude-code or bool claude=true)
+    has_claude = _is_agent_type_enabled(config, "claude")
+    has_cursor = _is_agent_type_enabled(config, "cursor")
+
+    # Claude provider — shared rules
+    if has_claude:
         claude_content = generate_claude_md(scored, project_name=project_name)
         claude_path = generated_dir / "CLAUDE.md"
         claude_path.write_text(claude_content)
@@ -91,11 +95,66 @@ def sync_rules(
         result.files_written.extend(rule_paths)
         logger.info("Generated CLAUDE.md + %d rule files", len(rule_paths))
 
-    # Cursor provider
-    if config.agents.get("cursor", False):
+    # Cursor provider — shared rules
+    if has_cursor:
         cursor_rules_dir = project_root / ".cursor" / "rules"
         rule_paths = generate_cursor_rules(scored, cursor_rules_dir)
         result.files_written.extend(rule_paths)
         logger.info("Generated %d Cursor rule files", len(rule_paths))
 
+    # Per-agent generation for onboarded agents with AgentConfig
+    for agent_name, agent_val in config.agents.items():
+        if not isinstance(agent_val, AgentConfig):
+            continue
+
+        agent_dir = generated_dir / agent_name
+        agent_dir.mkdir(parents=True, exist_ok=True)
+
+        # Filter decisions by agent's allowed dimensions
+        filtered = _filter_scored_for_agent(scored, agent_val)
+
+        agent_type = agent_val.type.lower()
+        if agent_type in ("claude-code", "claude"):
+            content = generate_claude_md(filtered, project_name=f"{project_name} ({agent_val.display_name or agent_name})")
+            path = agent_dir / "CLAUDE.md"
+            path.write_text(content)
+            result.files_written.append(path)
+        elif agent_type == "cursor":
+            rule_dir = agent_dir / ".cursor" / "rules"
+            paths = generate_cursor_rules(filtered, rule_dir)
+            result.files_written.extend(paths)
+
     return result
+
+
+def _is_agent_type_enabled(config: GovernanceConfig, agent_key: str) -> bool:
+    """Check if an agent type is enabled — handles bool and AgentConfig."""
+    val = config.agents.get(agent_key)
+    if val is None:
+        # Check if any AgentConfig has this as its type
+        for v in config.agents.values():
+            if isinstance(v, AgentConfig) and v.type.lower().startswith(agent_key):
+                return True
+        return False
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, AgentConfig):
+        return True
+    return bool(val)
+
+
+def _filter_scored_for_agent(
+    scored: list[ScoredDecision],
+    agent: AgentConfig,
+) -> list[ScoredDecision]:
+    """Filter scored decisions to those within an agent's allowed dimensions."""
+    if not agent.allowed_dimensions:
+        return scored  # No filter means all dimensions
+
+    allowed = set(agent.allowed_dimensions)
+    filtered = []
+    for sd in scored:
+        decision_dims = {d.value for d in sd.decision.dimensions}
+        if decision_dims & allowed:
+            filtered.append(sd)
+    return filtered

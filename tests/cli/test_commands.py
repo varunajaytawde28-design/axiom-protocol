@@ -104,7 +104,7 @@ class TestMainGroup:
 class TestInitCommand:
     def test_creates_smm_directory(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert (tmp_path / ".smm").is_dir()
         assert (tmp_path / ".smm" / "decisions").is_dir()
@@ -112,7 +112,7 @@ class TestInitCommand:
 
     def test_creates_governance_yaml(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert (tmp_path / "governance.yaml").is_file()
         assert "Created governance.yaml" in result.output
@@ -120,44 +120,44 @@ class TestInitCommand:
     def test_skips_existing_governance(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
         (tmp_path / "governance.yaml").write_text("existing: true\n")
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "already exists" in result.output
 
     def test_no_hooks_flag(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git" / "hooks").mkdir(parents=True)
-        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-hooks"])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-hooks", "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "Skipped git hooks" in result.output
 
     def test_no_mcp_flag(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-mcp"])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "Skipped .mcp.json" in result.output
         assert not (tmp_path / ".mcp.json").exists()
 
     def test_creates_mcp_json(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert (tmp_path / ".mcp.json").is_file()
 
     def test_installs_git_hooks(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git" / "hooks").mkdir(parents=True)
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "Installed git hooks" in result.output
 
     def test_no_git_dir_skips_hooks(self, runner: CliRunner, tmp_path: Path) -> None:
         # No .git dir, init should still work
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "skipped git hooks" in result.output
 
     def test_shows_next_steps(self, runner: CliRunner, tmp_path: Path) -> None:
         (tmp_path / ".git").mkdir()
-        result = runner.invoke(main, ["init", "--path", str(tmp_path)])
+        result = runner.invoke(main, ["init", "--path", str(tmp_path), "--no-llm-prompt", "--no-agent-prompt"])
         assert "vt check" in result.output
         assert "vt apply" in result.output
 

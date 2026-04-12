@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from vt_protocol.decisions.models import GovernanceConfig, GovernanceRules
+from vt_protocol.decisions.models import AgentConfig, GovernanceConfig, GovernanceRules, ModelConfig
 from vt_protocol.exceptions import GovernanceConfigError
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,14 @@ DEFAULT_GOVERNANCE_YAML = """\
 # Docs: https://github.com/varunajaytawde/vt-protocol
 extends:
   - "@vt/recommended"
+
+model:
+  provider: anthropic
+  model: claude-haiku-4-5-20251001
+  api-key-env: ANTHROPIC_API_KEY
+  temperature: 0.0
+  timeout-seconds: 10
+  fallback: nli-only
 
 agents:
   claude: true
@@ -167,9 +175,12 @@ def _parse_governance_dict(raw: dict[str, Any]) -> GovernanceConfig:
     if isinstance(extends, str):
         extends = [extends]
 
-    agents = raw.get("agents", {"claude": True, "cursor": True, "copilot": True})
-    if not isinstance(agents, dict):
-        raise GovernanceConfigError("'agents' must be a mapping of name → bool")
+    agents_raw = raw.get("agents", {"claude": True, "cursor": True, "copilot": True})
+    if not isinstance(agents_raw, dict):
+        raise GovernanceConfigError("'agents' must be a mapping")
+    agents = _parse_agents(agents_raw)
+
+    model = _parse_model(raw.get("model", {}))
 
     rules_raw = raw.get("rules", {})
     rules = _parse_rules(rules_raw)
@@ -184,9 +195,54 @@ def _parse_governance_dict(raw: dict[str, Any]) -> GovernanceConfig:
     return GovernanceConfig(
         extends=extends,
         agents=agents,
+        model=model,
         rules=rules,
         decisions_path=decisions_path,
     )
+
+
+def _parse_model(raw: dict[str, Any] | Any) -> ModelConfig:
+    """Parse the model: section of governance.yaml."""
+    if not isinstance(raw, dict):
+        return ModelConfig()
+    return ModelConfig(
+        provider=raw.get("provider", "anthropic"),
+        model=raw.get("model", "claude-haiku-4-5-20251001"),
+        api_key_env=raw.get("api-key-env", raw.get("api_key_env")),
+        base_url=raw.get("base-url", raw.get("base_url")),
+        temperature=float(raw.get("temperature", 0.0)),
+        timeout_seconds=int(raw.get("timeout-seconds", raw.get("timeout_seconds", 10))),
+        fallback=raw.get("fallback", "nli-only"),
+    )
+
+
+def _parse_agents(raw: dict[str, Any]) -> dict[str, bool | AgentConfig]:
+    """Parse agents section — supports both bool shorthand and full AgentConfig."""
+    result: dict[str, bool | AgentConfig] = {}
+    for name, value in raw.items():
+        if isinstance(value, bool):
+            result[name] = value
+        elif isinstance(value, dict):
+            result[name] = AgentConfig(
+                type=value.get("type", "claude-code"),
+                role=value.get("role", "full-stack"),
+                display_name=value.get("display-name", value.get("display_name", "")),
+                allowed_paths=value.get("allowed-paths", value.get("allowed_paths", [])),
+                blocked_paths=value.get("blocked-paths", value.get("blocked_paths", [])),
+                allowed_dimensions=value.get("allowed-dimensions", value.get("allowed_dimensions", [])),
+                restricted_dimensions=value.get("restricted-dimensions", value.get("restricted_dimensions", [])),
+                context_level=value.get("context-level", value.get("context_level", "full")),
+                auto_resolve=value.get("auto-resolve", value.get("auto_resolve", False)),
+                session_ttl_minutes=int(value.get("session-ttl-minutes", value.get("session_ttl_minutes", 60))),
+                block_on_contradiction=value.get("block-on-contradiction", value.get("block_on_contradiction", True)),
+                owner=value.get("owner", ""),
+                created_at=value.get("created-at", value.get("created_at", "")),
+                last_active=value.get("last-active", value.get("last_active")),
+            )
+        else:
+            # Treat unknown values as enabled
+            result[name] = bool(value)
+    return result
 
 
 def _parse_rules(raw: dict[str, Any] | Any) -> GovernanceRules:
@@ -210,9 +266,45 @@ def _parse_rules(raw: dict[str, Any] | Any) -> GovernanceRules:
 
 def _config_to_dict(config: GovernanceConfig) -> dict[str, Any]:
     """Convert a GovernanceConfig to a YAML-friendly dict with kebab-case keys."""
-    return {
+    # Serialize agents — keep bool shorthand where possible
+    agents_dict: dict[str, Any] = {}
+    for name, value in config.agents.items():
+        if isinstance(value, bool):
+            agents_dict[name] = value
+        elif isinstance(value, AgentConfig):
+            agent_d: dict[str, Any] = {
+                "type": value.type,
+                "role": value.role,
+            }
+            if value.display_name:
+                agent_d["display-name"] = value.display_name
+            if value.allowed_paths:
+                agent_d["allowed-paths"] = value.allowed_paths
+            if value.blocked_paths:
+                agent_d["blocked-paths"] = value.blocked_paths
+            if value.allowed_dimensions:
+                agent_d["allowed-dimensions"] = value.allowed_dimensions
+            if value.restricted_dimensions:
+                agent_d["restricted-dimensions"] = value.restricted_dimensions
+            agent_d["context-level"] = value.context_level
+            agent_d["auto-resolve"] = value.auto_resolve
+            agent_d["session-ttl-minutes"] = value.session_ttl_minutes
+            agent_d["block-on-contradiction"] = value.block_on_contradiction
+            if value.owner:
+                agent_d["owner"] = value.owner
+            if value.created_at:
+                agent_d["created-at"] = value.created_at
+            agents_dict[name] = agent_d
+        else:
+            agents_dict[name] = value
+
+    result: dict[str, Any] = {
         "extends": config.extends,
-        "agents": config.agents,
+        "model": {
+            "provider": config.model.provider,
+            "model": config.model.model,
+        },
+        "agents": agents_dict,
         "rules": {
             "freeze-on-adopt": config.rules.freeze_on_adopt,
             "contradiction-threshold": config.rules.contradiction_threshold,
@@ -222,3 +314,18 @@ def _config_to_dict(config: GovernanceConfig) -> dict[str, Any]:
             "path": config.decisions_path,
         },
     }
+
+    # Only include non-default model fields
+    m = config.model
+    if m.api_key_env:
+        result["model"]["api-key-env"] = m.api_key_env
+    if m.base_url:
+        result["model"]["base-url"] = m.base_url
+    if m.temperature != 0.0:
+        result["model"]["temperature"] = m.temperature
+    if m.timeout_seconds != 10:
+        result["model"]["timeout-seconds"] = m.timeout_seconds
+    if m.fallback != "nli-only":
+        result["model"]["fallback"] = m.fallback
+
+    return result

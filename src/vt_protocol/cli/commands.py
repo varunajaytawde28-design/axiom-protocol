@@ -33,13 +33,19 @@ def main(verbose: bool) -> None:
 @click.option("--path", type=click.Path(exists=True), default=".", help="Project root path")
 @click.option("--no-hooks", is_flag=True, help="Skip git hook installation")
 @click.option("--no-mcp", is_flag=True, help="Skip .mcp.json creation")
-def init(path: str, no_hooks: bool, no_mcp: bool) -> None:
+@click.option("--no-llm-prompt", is_flag=True, help="Skip LLM provider selection (use defaults)")
+@click.option("--no-agent-prompt", is_flag=True, help="Skip agent onboarding wizard")
+def init(path: str, no_hooks: bool, no_mcp: bool, no_llm_prompt: bool, no_agent_prompt: bool) -> None:
     """Initialize VT Protocol governance for a project.
 
     Creates .smm/ directory, governance.yaml with defaults, scans for
     existing architecture, and installs git hooks.
     """
-    from vt_protocol.config import ensure_smm_structure, save_governance_config
+    from vt_protocol.config import (
+        ensure_smm_structure,
+        load_governance_config,
+        save_governance_config,
+    )
     from vt_protocol.decisions.taxonomy import scan_project, scan_to_core_dimensions
 
     root = Path(path).resolve()
@@ -56,6 +62,22 @@ def init(path: str, no_hooks: bool, no_mcp: bool) -> None:
     else:
         save_governance_config(root)
         click.echo("  Created governance.yaml with defaults")
+
+    # 2b. LLM provider selection
+    if not no_llm_prompt:
+        config = load_governance_config(root)
+        model_config = _run_llm_provider_wizard()
+        if model_config is not None:
+            config.model = model_config
+            save_governance_config(root, config)
+
+    # 2c. Agent onboarding
+    if not no_agent_prompt:
+        config = load_governance_config(root)
+        new_agents = _run_agent_onboarding_wizard()
+        if new_agents:
+            config.agents.update(new_agents)
+            save_governance_config(root, config)
 
     # 3. Auto-detect existing architecture
     click.echo("  Scanning project for architectural patterns...")
@@ -398,6 +420,419 @@ def audit_commit(commit_hash: str, message: str, author: str) -> None:
     )
     tree.append(entry)
     tree.close()
+
+
+# ---------------------------------------------------------------------------
+# vt config (group)
+# ---------------------------------------------------------------------------
+
+
+@main.group()
+def config() -> None:
+    """View and modify VT Protocol configuration."""
+
+
+@config.command(name="llm")
+@click.option("--path", type=click.Path(exists=True), default=".", help="Project root path")
+@click.option("--provider", type=click.Choice(["anthropic", "openai", "ollama", "none"]), default=None)
+@click.option("--model", "model_name", default=None, help="Model identifier")
+@click.option("--base-url", default=None, help="Custom endpoint URL")
+@click.option("--test", "test_conn", is_flag=True, help="Test the LLM connection")
+def config_llm(path: str, provider: str | None, model_name: str | None, base_url: str | None, test_conn: bool) -> None:
+    """View or update LLM provider configuration.
+
+    With no options, displays the current LLM config.
+    With --provider, updates the provider in governance.yaml.
+    With --test, tests the connection.
+    """
+    from vt_protocol.config import find_project_root, load_governance_config, save_governance_config
+
+    root = Path(path).resolve()
+    try:
+        root = find_project_root(root)
+    except FileNotFoundError:
+        click.echo("Error: not a VT Protocol project. Run 'vt init' first.")
+        sys.exit(1)
+
+    cfg = load_governance_config(root)
+
+    if provider is None and model_name is None and base_url is None and not test_conn:
+        # Display current config
+        m = cfg.model
+        click.echo(f"LLM Provider Configuration:")
+        click.echo(f"  Provider:  {m.provider}")
+        click.echo(f"  Model:     {m.model}")
+        click.echo(f"  API Key:   {m.api_key_env or '(none)'}")
+        click.echo(f"  Base URL:  {m.base_url or '(default)'}")
+        click.echo(f"  Timeout:   {m.timeout_seconds}s")
+        click.echo(f"  Fallback:  {m.fallback}")
+        return
+
+    if provider is not None:
+        cfg.model.provider = provider
+        # Set sensible defaults for each provider
+        if provider == "anthropic" and model_name is None:
+            cfg.model.model = "claude-haiku-4-5-20251001"
+            cfg.model.api_key_env = "ANTHROPIC_API_KEY"
+            cfg.model.base_url = None
+        elif provider == "openai" and model_name is None:
+            cfg.model.model = "gpt-4o-mini"
+            cfg.model.api_key_env = "OPENAI_API_KEY"
+            cfg.model.base_url = None
+        elif provider == "ollama":
+            if model_name is None:
+                cfg.model.model = "llama3:8b"
+            cfg.model.api_key_env = None
+            cfg.model.base_url = base_url or "http://localhost:11434"
+        elif provider == "none":
+            cfg.model.api_key_env = None
+            cfg.model.base_url = None
+
+    if model_name is not None:
+        cfg.model.model = model_name
+    if base_url is not None:
+        cfg.model.base_url = base_url
+
+    save_governance_config(root, cfg)
+    click.echo(f"Updated LLM config: provider={cfg.model.provider}, model={cfg.model.model}")
+
+    if test_conn:
+        _test_llm_connection(cfg.model)
+
+
+# ---------------------------------------------------------------------------
+# vt onboard
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--path", type=click.Path(exists=True), default=".", help="Project root path")
+@click.option("--edit", "edit_name", default=None, help="Edit an existing agent by name")
+@click.option("--remove", "remove_name", default=None, help="Remove an agent by name")
+@click.option("--list", "list_agents", is_flag=True, help="List all onboarded agents")
+def onboard(path: str, edit_name: str | None, remove_name: str | None, list_agents: bool) -> None:
+    """Manage agent onboarding — add, edit, remove, or list agents.
+
+    With no flags, runs the interactive onboarding wizard.
+    """
+    from vt_protocol.config import find_project_root, load_governance_config, save_governance_config
+    from vt_protocol.decisions.models import AgentConfig
+
+    root = Path(path).resolve()
+    try:
+        root = find_project_root(root)
+    except FileNotFoundError:
+        click.echo("Error: not a VT Protocol project. Run 'vt init' first.")
+        sys.exit(1)
+
+    cfg = load_governance_config(root)
+
+    if list_agents:
+        _list_agents(cfg)
+        return
+
+    if remove_name:
+        if remove_name in cfg.agents:
+            del cfg.agents[remove_name]
+            save_governance_config(root, cfg)
+            click.echo(f"Removed agent: {remove_name}")
+        else:
+            click.echo(f"Agent not found: {remove_name}")
+            sys.exit(1)
+        return
+
+    if edit_name:
+        existing = cfg.agents.get(edit_name)
+        if existing is None:
+            click.echo(f"Agent not found: {edit_name}")
+            sys.exit(1)
+        if isinstance(existing, bool):
+            existing = AgentConfig()
+        agent_config = _run_single_agent_wizard(edit_name, existing)
+        cfg.agents[edit_name] = agent_config
+        save_governance_config(root, cfg)
+        click.echo(f"Updated agent: {edit_name}")
+        return
+
+    # Interactive wizard — add new agent
+    new_agents = _run_agent_onboarding_wizard()
+    if new_agents:
+        cfg.agents.update(new_agents)
+        save_governance_config(root, cfg)
+        click.echo(f"Saved {len(new_agents)} agent(s) to governance.yaml")
+    else:
+        click.echo("No agents configured.")
+
+
+# ---------------------------------------------------------------------------
+# LLM provider wizard
+# ---------------------------------------------------------------------------
+
+
+_LLM_PROVIDER_CHOICES = {
+    "1": ("anthropic", "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY"),
+    "2": ("openai", "gpt-4o-mini", "OPENAI_API_KEY"),
+    "3": ("ollama", "llama3:8b", None),
+    "4": ("none", "", None),
+}
+
+
+def _run_llm_provider_wizard():
+    """Interactive LLM provider selection. Returns ModelConfig or None."""
+    from vt_protocol.decisions.models import ModelConfig
+
+    click.echo("")
+    click.echo("Contradiction Detection Setup")
+    click.echo("─" * 40)
+    click.echo("VT Protocol uses an LLM to judge architectural contradictions.")
+    click.echo("The NLI pre-filter (local, no API needed) always runs first.")
+    click.echo("")
+    click.echo("Which LLM provider for deep contradiction analysis?")
+    click.echo("")
+    click.echo("  1. Anthropic (Claude Haiku 4.5) — fast, ~$0.002/check")
+    click.echo("  2. OpenAI (GPT-4o-mini) — comparable speed and cost")
+    click.echo("  3. Ollama (local) — free, private, no data leaves your machine")
+    click.echo("  4. None — NLI pre-filter only, no LLM judgment")
+    click.echo("")
+
+    choice = click.prompt("Choose", type=click.Choice(["1", "2", "3", "4"]), default="1")
+    provider, default_model, key_env = _LLM_PROVIDER_CHOICES[choice]
+
+    if provider == "anthropic":
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            click.echo("  ⚠ ANTHROPIC_API_KEY not set. Set it before running contradiction checks.")
+        return ModelConfig(provider="anthropic", model=default_model, api_key_env="ANTHROPIC_API_KEY")
+
+    if provider == "openai":
+        import os
+        if not os.environ.get("OPENAI_API_KEY"):
+            click.echo("  ⚠ OPENAI_API_KEY not set. Set it before running contradiction checks.")
+        return ModelConfig(provider="openai", model=default_model, api_key_env="OPENAI_API_KEY")
+
+    if provider == "ollama":
+        click.echo("")
+        click.echo("Ollama selected. Testing connection...")
+        from vt_protocol.decisions.llm_providers import test_ollama_connection
+        result = test_ollama_connection()
+        if result["connected"]:
+            click.echo(f"  ✓ Ollama running at localhost:11434")
+            if result["models"]:
+                click.echo(f"  Available models: {', '.join(result['models'][:10])}")
+                model_name = click.prompt("Which model?", default=default_model)
+            else:
+                click.echo("  No models found. Pull one with: ollama pull llama3:8b")
+                model_name = default_model
+        else:
+            click.echo(f"  ✗ Cannot connect to Ollama: {result['error']}")
+            click.echo("  Install: https://ollama.ai — then run: ollama serve")
+            model_name = default_model
+        return ModelConfig(provider="ollama", model=model_name, base_url="http://localhost:11434")
+
+    if provider == "none":
+        click.echo("  NLI-only mode selected. Confidence capped at 0.6.")
+        return ModelConfig(provider="none", model="")
+
+    return None
+
+
+def _test_llm_connection(model_config):
+    """Test an LLM provider connection."""
+    if model_config.provider == "ollama":
+        from vt_protocol.decisions.llm_providers import test_ollama_connection
+        base = model_config.base_url or "http://localhost:11434"
+        result = test_ollama_connection(base)
+        if result["connected"]:
+            click.echo(f"  ✓ Ollama connected. Models: {', '.join(result['models'][:5])}")
+        else:
+            click.echo(f"  ✗ Ollama unreachable: {result['error']}")
+    elif model_config.provider == "anthropic":
+        import os
+        key = os.environ.get(model_config.api_key_env or "ANTHROPIC_API_KEY")
+        click.echo(f"  {'✓' if key else '✗'} ANTHROPIC_API_KEY {'set' if key else 'not set'}")
+    elif model_config.provider == "openai":
+        import os
+        key = os.environ.get(model_config.api_key_env or "OPENAI_API_KEY")
+        click.echo(f"  {'✓' if key else '✗'} OPENAI_API_KEY {'set' if key else 'not set'}")
+    elif model_config.provider == "none":
+        click.echo("  ✓ NLI-only mode — no external connection needed")
+
+
+# ---------------------------------------------------------------------------
+# Agent onboarding wizard
+# ---------------------------------------------------------------------------
+
+
+_AGENT_TYPES = ["claude-code", "cursor", "copilot", "devin", "windsurf", "other"]
+
+_ROLE_DEFAULTS = {
+    "backend": {
+        "allowed_paths": ["src/**", "api/**", "services/**", "tests/**", "migrations/**"],
+        "blocked_paths": [".env", ".env.*", "secrets/**", "terraform/**", ".github/workflows/**", "infrastructure/**"],
+        "allowed_dimensions": ["database", "api-style", "caching", "concurrency", "error-handling", "logging", "testing", "state-management"],
+        "restricted_dimensions": ["security", "auth", "deployment"],
+    },
+    "frontend": {
+        "allowed_paths": ["ui/**", "components/**", "pages/**", "styles/**", "public/**", "src/**"],
+        "blocked_paths": [".env", "secrets/**", "api/**", "services/**", "migrations/**"],
+        "allowed_dimensions": ["state-management", "testing", "error-handling", "logging"],
+        "restricted_dimensions": ["security", "auth", "api-style", "database"],
+    },
+    "infra": {
+        "allowed_paths": ["terraform/**", "infrastructure/**", ".github/workflows/**", "docker/**", "k8s/**"],
+        "blocked_paths": [".env", "secrets/**"],
+        "allowed_dimensions": ["deployment", "security", "logging"],
+        "restricted_dimensions": ["database", "api-style", "state-management"],
+    },
+    "full-stack": {
+        "allowed_paths": [],
+        "blocked_paths": [".env", ".env.*", "secrets/**"],
+        "allowed_dimensions": [],
+        "restricted_dimensions": ["security"],
+    },
+    "security": {
+        "allowed_paths": ["**"],
+        "blocked_paths": [],
+        "allowed_dimensions": ["security", "auth", "error-handling"],
+        "restricted_dimensions": [],
+    },
+    "custom": {
+        "allowed_paths": [],
+        "blocked_paths": [".env", "secrets/**"],
+        "allowed_dimensions": [],
+        "restricted_dimensions": [],
+    },
+}
+
+
+def _run_agent_onboarding_wizard() -> dict:
+    """Interactive agent onboarding wizard. Returns dict of name → AgentConfig."""
+    from vt_protocol.decisions.models import AgentConfig
+
+    click.echo("")
+    click.echo("Agent Onboarding")
+    click.echo("─" * 40)
+    click.echo("Configure AI agents that will work on this project.")
+    click.echo("")
+
+    configure = click.confirm("Configure AI agents?", default=True)
+    if not configure:
+        return {}
+
+    agents = {}
+    while True:
+        click.echo("")
+        name = click.prompt("Agent name (blank to finish)", default="", show_default=False)
+        if not name:
+            break
+        agent_config = _run_single_agent_wizard(name)
+        agents[name] = agent_config
+        click.echo(f"  ✓ Agent '{name}' configured as {agent_config.role}")
+
+    if agents:
+        click.echo("")
+        click.echo("Summary")
+        click.echo("═" * 40)
+        for name, ac in agents.items():
+            click.echo(f"  {name}: type={ac.type}, role={ac.role}, "
+                        f"context={ac.context_level}, ttl={ac.session_ttl_minutes}min")
+
+    return agents
+
+
+def _run_single_agent_wizard(name: str, existing=None) -> "AgentConfig":
+    """Run wizard for a single agent. Returns AgentConfig."""
+    from vt_protocol.decisions.models import AgentConfig
+
+    if existing is None:
+        existing = AgentConfig()
+
+    click.echo(f"\n  Setting up: {name}")
+
+    # Type
+    type_choices = ["claude-code", "cursor", "copilot", "devin", "windsurf", "other"]
+    agent_type = click.prompt(
+        "  Agent type",
+        type=click.Choice(type_choices),
+        default=existing.type if existing.type in type_choices else "claude-code",
+    )
+
+    # Role
+    role_choices = ["full-stack", "backend", "frontend", "infra", "security", "custom"]
+    role = click.prompt(
+        "  Role",
+        type=click.Choice(role_choices),
+        default=existing.role if existing.role in role_choices else "full-stack",
+    )
+
+    defaults = _ROLE_DEFAULTS.get(role, _ROLE_DEFAULTS["custom"])
+
+    # Paths
+    allowed_paths = existing.allowed_paths or defaults["allowed_paths"]
+    blocked_paths = existing.blocked_paths or defaults["blocked_paths"]
+
+    if allowed_paths:
+        click.echo(f"  Allowed paths: {', '.join(allowed_paths[:5])}")
+    if blocked_paths:
+        click.echo(f"  Blocked paths: {', '.join(blocked_paths[:5])}")
+
+    # Dimensions
+    allowed_dims = existing.allowed_dimensions or defaults["allowed_dimensions"]
+    restricted_dims = existing.restricted_dimensions or defaults["restricted_dimensions"]
+
+    # Context level
+    context = click.prompt(
+        "  Context level",
+        type=click.Choice(["full", "relevant", "minimal"]),
+        default=existing.context_level,
+    )
+
+    # Session TTL
+    ttl = click.prompt("  Session TTL (minutes, 0=unlimited)", type=int, default=existing.session_ttl_minutes)
+
+    # Block on contradiction
+    block = click.confirm("  Block on unresolved contradictions?", default=existing.block_on_contradiction)
+
+    return AgentConfig(
+        type=agent_type,
+        role=role,
+        display_name=existing.display_name or name.replace("-", " ").title(),
+        allowed_paths=allowed_paths,
+        blocked_paths=blocked_paths,
+        allowed_dimensions=allowed_dims,
+        restricted_dimensions=restricted_dims,
+        context_level=context,
+        auto_resolve=existing.auto_resolve,
+        session_ttl_minutes=ttl,
+        block_on_contradiction=block,
+        owner=existing.owner,
+    )
+
+
+def _list_agents(cfg) -> None:
+    """Display all configured agents."""
+    from vt_protocol.decisions.models import AgentConfig
+
+    click.echo("Onboarded Agents:")
+    click.echo("─" * 60)
+    found = False
+    for name, val in cfg.agents.items():
+        found = True
+        if isinstance(val, bool):
+            status = "enabled" if val else "disabled"
+            click.echo(f"  {name}: {status} (simple mode)")
+        elif isinstance(val, AgentConfig):
+            click.echo(f"  {name}:")
+            click.echo(f"    Type:        {val.type}")
+            click.echo(f"    Role:        {val.role}")
+            click.echo(f"    Context:     {val.context_level}")
+            click.echo(f"    Allowed:     {', '.join(val.allowed_paths[:3]) or '(all)'}")
+            click.echo(f"    Blocked:     {', '.join(val.blocked_paths[:3]) or '(none)'}")
+            click.echo(f"    Dimensions:  {len(val.allowed_dimensions)} allowed, {len(val.restricted_dimensions)} restricted")
+            click.echo(f"    TTL:         {val.session_ttl_minutes} min")
+            click.echo(f"    Block:       {'yes' if val.block_on_contradiction else 'no'}")
+    if not found:
+        click.echo("  No agents configured.")
 
 
 # ---------------------------------------------------------------------------

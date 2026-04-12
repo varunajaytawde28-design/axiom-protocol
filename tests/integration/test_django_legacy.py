@@ -34,14 +34,14 @@ class TestDjangoLegacy:
     def test_init_detects_patterns(self, django_project):
         """vt init detects Django-specific architectural patterns."""
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp"])
+        result = runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert "Detected" in result.output or "patterns" in result.output.lower()
 
     def test_init_creates_decisions(self, django_project):
         """vt init writes initial decision records for detected patterns."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp"])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
 
         decisions_dir = django_project / ".smm" / "decisions"
         assert decisions_dir.is_dir()
@@ -52,7 +52,7 @@ class TestDjangoLegacy:
     def test_check_after_init(self, django_project):
         """vt check works after init on a Django project."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp"])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["check", "--path", str(django_project), "--json-output"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -62,14 +62,14 @@ class TestDjangoLegacy:
     def test_gate_after_init(self, django_project):
         """vt gate passes on a freshly initialized Django project."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp"])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["gate", "--path", str(django_project), "--json-output"])
         assert result.exit_code == 0
 
     def test_apply_after_init(self, django_project):
         """vt apply generates instruction files from auto-detected decisions."""
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp"])
+        runner.invoke(main, ["init", "--path", str(django_project), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["apply", "--path", str(django_project)])
         assert result.exit_code == 0
         assert "Generated" in result.output

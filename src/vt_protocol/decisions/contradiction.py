@@ -29,6 +29,12 @@ from vt_protocol.decisions.models import (
 )
 from vt_protocol.exceptions import ContradictionDetectionError
 
+# TYPE_CHECKING avoids circular imports at runtime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vt_protocol.decisions.llm_providers import LLMProvider
+
 logger = logging.getLogger(__name__)
 
 # NLI score below this threshold → skip LLM (assume COMPATIBLE)
@@ -230,28 +236,17 @@ def llm_check(
     api_key: str | None = None,
     temperature: float | None = None,
     nli_distribution: NLIDistribution | None = None,
+    provider: "LLMProvider | None" = None,
 ) -> dict[str, Any] | None:
-    """Call Claude for structured contradiction judgment.
+    """Call LLM for structured contradiction judgment.
 
+    Uses the provided LLMProvider, or falls back to Anthropic via API key.
     Returns parsed JSON dict with reasoning, verdict, confidence, evidence_a,
-    evidence_b. Returns None if the API key is missing or the call fails.
+    evidence_b. Returns None if the provider is unavailable or the call fails.
 
     When nli_distribution is provided, soft labels are included in the prompt
     to give the LLM additional context (Madaan et al. 2025).
     """
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        logger.debug("No ANTHROPIC_API_KEY, skipping LLM contradiction check")
-        return None
-
-    try:
-        import anthropic
-    except ImportError:
-        logger.debug("anthropic package not installed, skipping LLM check")
-        return None
-
-    client = anthropic.Anthropic(api_key=key)
-
     dims_str = ", ".join(d.value for d in shared_dimensions) or "none"
 
     # Use soft-label template when NLI distribution is available
@@ -280,6 +275,24 @@ def llm_check(
             content_b=decision_b.content,
             dimensions=dims_str,
         )
+
+    # If a provider is given, use it
+    if provider is not None:
+        return provider.check(_SYSTEM_PROMPT, user_msg, temperature=temperature)
+
+    # Legacy fallback: direct Anthropic usage (backward compatibility)
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        logger.debug("No ANTHROPIC_API_KEY, skipping LLM contradiction check")
+        return None
+
+    try:
+        import anthropic
+    except ImportError:
+        logger.debug("anthropic package not installed, skipping LLM check")
+        return None
+
+    client = anthropic.Anthropic(api_key=key)
 
     try:
         kwargs: dict[str, Any] = {
@@ -340,6 +353,7 @@ def check_contradiction(
     skip_voting: bool = False,
     model: str = DEFAULT_MODEL,
     api_key: str | None = None,
+    provider: "LLMProvider | None" = None,
 ) -> Contradiction | None:
     """Run the full contradiction detection pipeline.
 
@@ -380,6 +394,7 @@ def check_contradiction(
         decision_a, decision_b, shared_dims,
         model=model, api_key=api_key,
         nli_distribution=nli_dist,
+        provider=provider,
     )
     if result is None:
         return None
@@ -397,6 +412,7 @@ def check_contradiction(
             initial_result=result,
             model=model,
             api_key=api_key,
+            provider=provider,
         )
         if voted is not None:
             result = voted
@@ -432,6 +448,7 @@ def _self_consistency_vote(
     initial_result: dict[str, Any],
     model: str = DEFAULT_MODEL,
     api_key: str | None = None,
+    provider: "LLMProvider | None" = None,
 ) -> dict[str, Any] | None:
     """Run multiple LLM calls at higher temperature and majority-vote on verdict.
 
@@ -447,6 +464,7 @@ def _self_consistency_vote(
             model=model,
             api_key=api_key,
             temperature=VOTING_TEMPERATURE,
+            provider=provider,
         )
         if r is not None:
             all_results.append(r)

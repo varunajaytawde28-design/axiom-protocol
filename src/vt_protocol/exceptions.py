@@ -27,3 +27,11 @@ class MerkleVerificationError(VTProtocolError):
 
 class GovernanceConfigError(VTProtocolError):
     """Raised when governance.yaml is missing or malformed."""
+
+
+class LLMProviderError(VTProtocolError):
+    """Raised when an LLM provider fails or is misconfigured."""
+
+
+class AgentAccessDeniedError(VTProtocolError):
+    """Raised when an agent attempts an action outside its allowed scope."""

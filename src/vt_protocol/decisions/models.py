@@ -424,6 +424,52 @@ class Session(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ModelConfig(BaseModel):
+    """LLM provider configuration for contradiction detection."""
+
+    provider: str = Field(
+        default="anthropic",
+        description="LLM provider: anthropic | openai | ollama | none",
+    )
+    model: str = Field(
+        default="claude-haiku-4-5-20251001",
+        description="Model identifier",
+    )
+    api_key_env: str | None = Field(
+        default=None,
+        description="Environment variable name for API key",
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Custom endpoint URL (e.g. http://localhost:11434/v1 for Ollama)",
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    timeout_seconds: int = Field(default=10, ge=1, le=120)
+    fallback: str = Field(
+        default="nli-only",
+        description="Fallback on LLM failure: nli-only | error | skip",
+    )
+
+
+class AgentConfig(BaseModel):
+    """Per-agent onboarding configuration in governance.yaml."""
+
+    type: str = Field(default="claude-code", description="Agent type identifier")
+    role: str = Field(default="full-stack", description="Role: backend | frontend | infra | full-stack | security | custom")
+    display_name: str = ""
+    allowed_paths: list[str] = Field(default_factory=list, description="Glob patterns for allowed files")
+    blocked_paths: list[str] = Field(default_factory=list, description="Glob patterns for blocked files")
+    allowed_dimensions: list[str] = Field(default_factory=list, description="Dimensions agent can decide on")
+    restricted_dimensions: list[str] = Field(default_factory=list, description="Dimensions requiring human approval")
+    context_level: str = Field(default="full", description="full | relevant | minimal")
+    auto_resolve: bool = Field(default=False, description="Can auto-resolve low-risk tensions")
+    session_ttl_minutes: int = Field(default=60, ge=0)
+    block_on_contradiction: bool = Field(default=True, description="Block agent on unresolved contradictions")
+    owner: str = ""
+    created_at: str = ""
+    last_active: str | None = None
+
+
 class GovernanceConfig(BaseModel):
     """Schema for governance.yaml — the project-level governance configuration.
 
@@ -435,9 +481,13 @@ class GovernanceConfig(BaseModel):
         default_factory=lambda: ["@vt/recommended"],
         description="Shareable configs to extend",
     )
-    agents: dict[str, bool] = Field(
+    agents: dict[str, bool | AgentConfig] = Field(
         default_factory=lambda: {"claude": True, "cursor": True, "copilot": True},
-        description="Which agent output formats to generate",
+        description="Agent configs: simple bool or full AgentConfig",
+    )
+    model: ModelConfig = Field(
+        default_factory=ModelConfig,
+        description="LLM provider configuration",
     )
     rules: GovernanceRules = Field(default_factory=lambda: GovernanceRules())
     decisions_path: str = Field(

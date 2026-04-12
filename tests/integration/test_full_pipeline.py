@@ -38,7 +38,7 @@ class TestFullPipeline:
         (root / ".git").mkdir()
 
         runner = CliRunner()
-        result = runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp"])
+        result = runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         assert result.exit_code == 0
         assert (root / ".smm" / "decisions").is_dir()
         assert (root / "governance.yaml").is_file()
@@ -50,7 +50,7 @@ class TestFullPipeline:
         (root / ".git").mkdir()
 
         runner = CliRunner()
-        runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp"])
+        runner.invoke(main, ["init", "--path", str(root), "--no-hooks", "--no-mcp", "--no-llm-prompt", "--no-agent-prompt"])
         result = runner.invoke(main, ["check", "--path", str(root), "--json-output"])
         assert result.exit_code == 0
         data = json.loads(result.output)

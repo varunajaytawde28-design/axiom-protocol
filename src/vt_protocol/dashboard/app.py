@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from vt_protocol.audit.merkle import MerkleTree
+from vt_protocol.config import load_governance_config
 from vt_protocol.decisions.models import (
+    AgentConfig,
     AuditEntry,
     AuditEventType,
     Contradiction,
@@ -83,6 +86,12 @@ class DashboardState:
         self.sessions: list[dict[str, Any]] = []
         self._merkle: MerkleTree | None = None
         self._ws_clients: list[WebSocket] = []
+        # Observation state
+        self._signals: list[Any] = []
+        self._spans: list[Any] = []
+        self._edges: list[Any] = []
+        self._trajectory_alerts: list[dict[str, Any]] = []
+        self._snapshot_diff: Any = None
 
     @property
     def merkle(self) -> MerkleTree | None:
@@ -97,6 +106,61 @@ class DashboardState:
         self.decisions = _load_decisions(self.project_root)
         self.contradictions = _load_contradictions(self.project_root)
         self.sessions = _load_sessions(self.project_root)
+        self._load_observation()
+
+    def _load_observation(self) -> None:
+        """Load observation data from .smm/cache and .smm/observation."""
+        from vt_protocol.observation.cache import diff_snapshots, load_snapshot
+        from vt_protocol.observation.signals import (
+            detect_dependency_changes,
+            detect_file_changes,
+        )
+
+        # Load snapshots and compute signals
+        cache_dir = self.project_root / ".smm" / "cache"
+        before_path = cache_dir / "snapshot_before.json"
+        after_path = cache_dir / "snapshot_after.json"
+
+        if before_path.exists() and after_path.exists():
+            try:
+                before = load_snapshot(before_path)
+                after = load_snapshot(after_path)
+                self._snapshot_diff = diff_snapshots(before, after)
+                self._signals = detect_file_changes(before, after)
+                self._signals += detect_dependency_changes(self._snapshot_diff)
+            except Exception:
+                logger.debug("Failed to load observation snapshots", exc_info=True)
+
+        # Load persisted spans
+        obs_dir = self.project_root / ".smm" / "observation"
+        spans_path = obs_dir / "spans.json"
+        if spans_path.exists():
+            try:
+                from vt_protocol.observation.models import Span
+
+                data = json.loads(spans_path.read_text())
+                self._spans = [Span(**s) for s in data]
+            except Exception:
+                logger.debug("Failed to load observation spans", exc_info=True)
+
+        # Load persisted causal edges
+        edges_path = obs_dir / "edges.json"
+        if edges_path.exists():
+            try:
+                from vt_protocol.observation.models import CausalEdge
+
+                data = json.loads(edges_path.read_text())
+                self._edges = [CausalEdge(**e) for e in data]
+            except Exception:
+                logger.debug("Failed to load observation edges", exc_info=True)
+
+        # Load trajectory alerts
+        trajectory_path = obs_dir / "trajectory.json"
+        if trajectory_path.exists():
+            try:
+                self._trajectory_alerts = json.loads(trajectory_path.read_text())
+            except Exception:
+                logger.debug("Failed to load trajectory data", exc_info=True)
 
     async def broadcast(self, event_type: str, data: dict[str, Any]) -> None:
         """Push event to all connected WebSocket clients."""
@@ -844,6 +908,327 @@ async def api_sessions() -> dict[str, Any]:
     return {
         "total": len(state.sessions),
         "sessions": state.sessions,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Agent management endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/agents")
+async def api_agents() -> dict[str, Any]:
+    """List all onboarded agents with activity stats."""
+    state = get_state()
+    try:
+        config = load_governance_config(state.project_root)
+    except Exception:
+        return {"total": 0, "agents": []}
+
+    agents_list = []
+    for name, val in config.agents.items():
+        if isinstance(val, bool):
+            agents_list.append({
+                "name": name,
+                "enabled": val,
+                "type": "simple",
+                "role": None,
+                "config": None,
+            })
+        elif isinstance(val, AgentConfig):
+            # Compute activity stats from decisions
+            decisions_by_agent = [d for d in state.decisions if d.made_by == name]
+            agents_list.append({
+                "name": name,
+                "enabled": True,
+                "type": val.type,
+                "role": val.role,
+                "display_name": val.display_name,
+                "allowed_paths": val.allowed_paths,
+                "blocked_paths": val.blocked_paths,
+                "allowed_dimensions": val.allowed_dimensions,
+                "restricted_dimensions": val.restricted_dimensions,
+                "context_level": val.context_level,
+                "session_ttl_minutes": val.session_ttl_minutes,
+                "block_on_contradiction": val.block_on_contradiction,
+                "auto_resolve": val.auto_resolve,
+                "activity": {
+                    "decisions_made": len(decisions_by_agent),
+                    "contradictions_triggered": sum(
+                        1 for c in state.contradictions
+                        if any(d.id in (c.decision_a_id, c.decision_b_id) for d in decisions_by_agent)
+                    ),
+                },
+                "config": {
+                    "owner": val.owner,
+                    "created_at": val.created_at,
+                    "last_active": val.last_active,
+                },
+            })
+
+    return {"total": len(agents_list), "agents": agents_list}
+
+
+@app.get("/api/agents/{agent_name}")
+async def api_agent_detail(agent_name: str) -> dict[str, Any]:
+    """Single agent detail with recent decisions."""
+    state = get_state()
+    try:
+        config = load_governance_config(state.project_root)
+    except Exception:
+        raise HTTPException(404, "Cannot load governance config")
+
+    val = config.agents.get(agent_name)
+    if val is None:
+        raise HTTPException(404, f"Agent '{agent_name}' not found")
+
+    if isinstance(val, bool):
+        return {"name": agent_name, "enabled": val, "type": "simple"}
+
+    decisions_by_agent = [d for d in state.decisions if d.made_by == agent_name]
+
+    return {
+        "name": agent_name,
+        "type": val.type,
+        "role": val.role,
+        "display_name": val.display_name,
+        "allowed_paths": val.allowed_paths,
+        "blocked_paths": val.blocked_paths,
+        "allowed_dimensions": val.allowed_dimensions,
+        "restricted_dimensions": val.restricted_dimensions,
+        "context_level": val.context_level,
+        "session_ttl_minutes": val.session_ttl_minutes,
+        "block_on_contradiction": val.block_on_contradiction,
+        "recent_decisions": [_serialize_decision(d) for d in decisions_by_agent[:10]],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Observation endpoints (Lattice)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/signals")
+async def api_signals() -> dict[str, Any]:
+    """Traffic-light view of the 7 golden signals.
+
+    Returns signals grouped by severity (critical/warning/info)
+    with an overall status (green/yellow/red).
+    """
+    state = get_state()
+    signals = list(state._signals)
+
+    by_severity: dict[str, list[dict[str, Any]]] = {
+        "critical": [],
+        "warning": [],
+        "info": [],
+    }
+    for sig in signals:
+        entry = {
+            "name": sig.name,
+            "severity": sig.severity,
+            "message": sig.message,
+            "details": sig.details,
+            "timestamp": sig.timestamp.isoformat(),
+        }
+        by_severity.get(sig.severity, by_severity["info"]).append(entry)
+
+    if by_severity["critical"]:
+        status = "red"
+    elif by_severity["warning"]:
+        status = "yellow"
+    else:
+        status = "green"
+
+    return {
+        "status": status,
+        "total": len(signals),
+        "critical": by_severity["critical"],
+        "warning": by_severity["warning"],
+        "info": by_severity["info"],
+        "snapshot_available": state._snapshot_diff is not None,
+        "file_changes": {
+            "added": len(state._snapshot_diff.added) if state._snapshot_diff else 0,
+            "removed": len(state._snapshot_diff.removed) if state._snapshot_diff else 0,
+            "modified": len(state._snapshot_diff.modified) if state._snapshot_diff else 0,
+        },
+    }
+
+
+@app.get("/api/traces")
+async def api_traces(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> dict[str, Any]:
+    """LLM call trace feed — intercepted spans from observation engine."""
+    state = get_state()
+    spans = state._spans
+
+    total = len(spans)
+    sorted_spans = sorted(spans, key=lambda s: s.timestamp, reverse=True)
+    page = sorted_spans[offset : offset + limit]
+
+    total_cost = sum(s.cost_usd or 0 for s in spans)
+    total_tokens_in = sum(s.tokens_in for s in spans)
+    total_tokens_out = sum(s.tokens_out for s in spans)
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "summary": {
+            "total_cost_usd": round(total_cost, 6),
+            "total_tokens_in": total_tokens_in,
+            "total_tokens_out": total_tokens_out,
+            "providers": sorted({s.provider for s in spans}),
+            "models": sorted({s.model for s in spans}),
+        },
+        "spans": [
+            {
+                "span_id": s.span_id,
+                "trace_id": s.trace_id,
+                "agent_id": s.agent_id,
+                "model": s.model,
+                "provider": s.provider,
+                "tokens_in": s.tokens_in,
+                "tokens_out": s.tokens_out,
+                "cost_usd": s.cost_usd,
+                "latency_ms": s.latency_ms,
+                "status": s.status,
+                "timestamp": s.timestamp,
+                "tainted_source": s.tainted_source,
+            }
+            for s in page
+        ],
+    }
+
+
+@app.get("/api/provenance")
+async def api_provenance() -> dict[str, Any]:
+    """Causal provenance graph — TaintedStr flow + CausalEdge links.
+
+    Returns a Cytoscape.js-format graph with spans as nodes and
+    causal edges between them.
+    """
+    state = get_state()
+    spans = state._spans
+    edges = state._edges
+
+    nodes = []
+    for s in spans:
+        nodes.append({
+            "data": {
+                "id": s.span_id,
+                "label": f"{s.model} ({s.provider})",
+                "agent_id": s.agent_id or "unknown",
+                "model": s.model,
+                "provider": s.provider,
+                "cost_usd": s.cost_usd,
+                "latency_ms": s.latency_ms,
+                "timestamp": s.timestamp,
+            },
+        })
+
+    graph_edges = []
+    for e in edges:
+        graph_edges.append({
+            "data": {
+                "id": f"{e.source_span_id}-{e.target_span_id}",
+                "source": e.source_span_id,
+                "target": e.target_span_id,
+                "type": e.edge_type,
+                "confidence": e.confidence,
+            },
+        })
+
+    edge_types: dict[str, int] = dict(Counter(e.edge_type for e in edges)) if edges else {}
+
+    return {
+        "summary": {
+            "total_spans": len(spans),
+            "total_edges": len(edges),
+            "edge_types": edge_types,
+        },
+        "graph": {
+            "nodes": nodes,
+            "edges": graph_edges,
+        },
+    }
+
+
+@app.get("/api/secrets")
+async def api_secrets() -> dict[str, Any]:
+    """Secret detection scan across decision content."""
+    from vt_protocol.observation.secrets import scan as scan_secrets
+
+    state = get_state()
+    all_matches: list[dict[str, Any]] = []
+    files_scanned = 0
+
+    for d in state.decisions:
+        result = scan_secrets(d.content)
+        if result.has_secrets:
+            for m in result.matches:
+                all_matches.append({
+                    "source": f"decision:{d.title}",
+                    "secret_type": m.secret_type,
+                    "redacted": m.redacted,
+                    "preview": m.original_preview,
+                })
+        files_scanned += 1
+
+    by_type: dict[str, int] = {}
+    for m in all_matches:
+        by_type[m["secret_type"]] = by_type.get(m["secret_type"], 0) + 1
+
+    return {
+        "total_matches": len(all_matches),
+        "files_scanned": files_scanned,
+        "by_type": by_type,
+        "matches": all_matches[:100],
+        "status": "clean" if not all_matches else "alert",
+    }
+
+
+@app.get("/api/scope-creep")
+async def api_scope_creep() -> dict[str, Any]:
+    """Scope creep and trajectory analysis — alerts for loops, thrashing, drift."""
+    state = get_state()
+    alerts = list(state._trajectory_alerts)
+
+    scope_signal = None
+    if state._snapshot_diff:
+        from vt_protocol.observation.signals import detect_scope_creep
+
+        changed_files = [e.path for e in state._snapshot_diff.added] + [
+            after.path for _, after in state._snapshot_diff.modified
+        ]
+        if changed_files:
+            sig = detect_scope_creep(
+                task_description="project maintenance",
+                changed_files=changed_files,
+            )
+            if sig:
+                scope_signal = {
+                    "name": sig.name,
+                    "severity": sig.severity,
+                    "message": sig.message,
+                    "details": sig.details,
+                }
+
+    return {
+        "total_alerts": len(alerts),
+        "alerts": alerts,
+        "scope_signal": scope_signal,
+        "file_changes_summary": {
+            "total": state._snapshot_diff.total_changes if state._snapshot_diff else 0,
+            "by_category": {
+                k.value: v
+                for k, v in state._snapshot_diff.changes_by_category().items()
+            }
+            if state._snapshot_diff
+            else {},
+        },
     }
 
 

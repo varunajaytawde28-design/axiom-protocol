@@ -27,6 +27,7 @@ from fastmcp import FastMCP
 
 from vt_protocol.config import find_project_root, load_governance_config
 from vt_protocol.decisions.models import (
+    AgentConfig,
     Contradiction,
     ContradictionStatus,
     ContradictionVerdict,
@@ -78,6 +79,7 @@ def check_before_coding(
     file_path: str,
     project: str = "",
     task_description: str = "",
+    agent_id: str = "",
 ) -> str:
     """Get architectural constraints relevant to a file before coding.
 
@@ -88,10 +90,25 @@ def check_before_coding(
         file_path: Path to the file you're about to modify.
         project: Project identifier. Auto-detected from governance.yaml if empty.
         task_description: Brief description of what you plan to do.
+        agent_id: Agent identifier for access control.
     """
     project = project or _detect_project()
-    session = _get_or_create_session(project)
+    session = _get_or_create_session(project, agent_id=agent_id or None)
     session.context_injections += 1
+
+    # Agent access enforcement
+    agent_cfg = _get_agent_config(agent_id)
+    if agent_cfg:
+        path_check = _check_path_access(agent_cfg, file_path)
+        if not path_check["allowed"]:
+            result = {
+                "session_id": session.session_id,
+                "project": project,
+                "file_path": file_path,
+                "access_denied": True,
+                "reason": path_check["reason"],
+            }
+            return json.dumps(result, indent=2)
 
     try:
         client = _get_graph_client()
@@ -102,6 +119,10 @@ def check_before_coding(
 
     # Filter to decisions whose dimensions are relevant to the file path
     relevant = _filter_relevant_decisions(decisions, file_path)
+
+    # Apply agent context-level filtering
+    if agent_cfg:
+        relevant = _filter_decisions_by_context(relevant, agent_cfg)
 
     # Get unresolved contradictions
     try:
@@ -118,7 +139,7 @@ def check_before_coding(
             {
                 "id": str(d.id),
                 "title": d.title,
-                "content": d.content[:500],
+                "content": d.content[:500] if not agent_cfg or agent_cfg.context_level != "minimal" else d.title,
                 "dimensions": [dim.value for dim in d.dimensions],
                 "status": d.status.value,
                 "confidence": d.confidence,
@@ -144,6 +165,7 @@ def validate_change(
     diff: str,
     project: str = "",
     file_path: str = "",
+    agent_id: str = "",
 ) -> str:
     """Validate a proposed code change against the decision graph.
 
@@ -154,8 +176,21 @@ def validate_change(
         diff: The proposed code change (unified diff format or description).
         project: Project identifier.
         file_path: Path to the file being changed.
+        agent_id: Agent identifier for access control.
     """
     project = project or _detect_project()
+
+    # Agent access enforcement
+    agent_cfg = _get_agent_config(agent_id)
+    if agent_cfg and file_path:
+        path_check = _check_path_access(agent_cfg, file_path)
+        if not path_check["allowed"]:
+            return json.dumps({
+                "project": project,
+                "status": "blocked",
+                "access_denied": True,
+                "reason": path_check["reason"],
+            }, indent=2)
 
     try:
         client = _get_graph_client()
@@ -206,6 +241,7 @@ def get_project_decisions(
     project: str = "",
     dimension: str = "",
     active_only: bool = True,
+    agent_id: str = "",
 ) -> str:
     """List active architectural decisions for a project.
 
@@ -216,9 +252,10 @@ def get_project_decisions(
         project: Project identifier.
         dimension: Filter by dimension name (e.g. "database"). Empty = all.
         active_only: Only return active (non-superseded) decisions.
+        agent_id: Agent identifier for context-level filtering.
     """
     project = project or _detect_project()
-    session = _get_or_create_session(project)
+    session = _get_or_create_session(project, agent_id=agent_id or None)
     session.context_injections += 1
 
     try:
@@ -235,6 +272,15 @@ def get_project_decisions(
         except ValueError:
             pass  # Invalid dimension name, return all
 
+    # Agent context-level filtering
+    agent_cfg = _get_agent_config(agent_id)
+    if agent_cfg:
+        decisions = _filter_decisions_by_context(decisions, agent_cfg)
+
+    content_limit = 300
+    if agent_cfg and agent_cfg.context_level == "minimal":
+        content_limit = 0  # Only titles
+
     result = {
         "project": project,
         "dimension_filter": dimension or "all",
@@ -243,7 +289,7 @@ def get_project_decisions(
             {
                 "id": str(d.id),
                 "title": d.title,
-                "content": d.content[:300],
+                "content": d.content[:content_limit] if content_limit else "",
                 "decision_type": d.decision_type.value,
                 "dimensions": [dim.value for dim in d.dimensions],
                 "status": d.status.value,
@@ -273,6 +319,7 @@ def report_decision(
     constraints: list[str] | None = None,
     project: str = "",
     supersedes: str = "",
+    agent_id: str = "",
 ) -> str:
     """Record a new architectural or technical decision.
 
@@ -289,9 +336,10 @@ def report_decision(
         constraints: Constraints that influenced the decision.
         project: Project identifier.
         supersedes: UUID of the decision this supersedes (if any).
+        agent_id: Agent identifier for access control.
     """
     project = project or _detect_project()
-    session = _get_or_create_session(project)
+    session = _get_or_create_session(project, agent_id=agent_id or None)
 
     # Parse dimensions
     parsed_dims: list[Dimension] = []
@@ -301,15 +349,29 @@ def report_decision(
         except ValueError:
             logger.debug("Unknown dimension: %s", d)
 
+    # Agent dimension enforcement
+    agent_cfg = _get_agent_config(agent_id)
+    proposed_status = DecisionStatus.ACTIVE
+    restricted_note = ""
+    if agent_cfg and dimensions:
+        dim_check = _check_dimension_access(agent_cfg, dimensions)
+        if dim_check.get("restricted"):
+            proposed_status = DecisionStatus.PROPOSED
+            restricted_note = (
+                f"Dimensions {dim_check['restricted']} are restricted for this agent. "
+                "Decision saved as PROPOSED — requires human approval."
+            )
+
     decision = Decision(
         title=title,
         content=content,
         rationale=rationale,
+        status=proposed_status,
         decision_type=DecisionType.normalize(decision_type),
         dimensions=parsed_dims,
         alternatives=alternatives or [],
         constraints=constraints or [],
-        made_by=session.agent_id or "mcp-agent",
+        made_by=session.agent_id or agent_id or "mcp-agent",
         project=project,
         source_type=SourceType.AGENT,
         session_id=session.session_id,
@@ -329,19 +391,27 @@ def report_decision(
         decision_id = decision.id
         stored = False
 
+    status_label = "recorded" if stored else "recorded_locally"
+    if proposed_status == DecisionStatus.PROPOSED:
+        status_label = "proposed"
+
+    note = (
+        "Decision recorded in graph."
+        if stored
+        else "Decision created but not persisted (database unavailable)."
+    )
+    if restricted_note:
+        note = restricted_note
+
     result = {
         "decision_id": str(decision_id),
         "title": title,
-        "status": "recorded" if stored else "recorded_locally",
+        "status": status_label,
         "dimensions": [d.value for d in parsed_dims],
         "confidence": decision.confidence,
         "session_id": session.session_id,
         "supersedes": supersedes or None,
-        "note": (
-            "Decision recorded in graph."
-            if stored
-            else "Decision created but not persisted (database unavailable)."
-        ),
+        "note": note,
     }
     return json.dumps(result, indent=2)
 
@@ -423,6 +493,101 @@ def get_resolution(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _get_agent_config(agent_id: str | None) -> AgentConfig | None:
+    """Look up agent config from governance.yaml. Returns None if not found or bool agent."""
+    if not agent_id:
+        return None
+    config = _load_config()
+    if config is None:
+        return None
+    val = config.agents.get(agent_id)
+    if isinstance(val, AgentConfig):
+        return val
+    return None
+
+
+def _check_path_access(agent: AgentConfig, file_path: str) -> dict[str, Any]:
+    """Check if an agent can access a file path.
+
+    Returns dict with 'allowed' (bool) and 'reason' (str).
+    """
+    import fnmatch
+
+    if not file_path:
+        return {"allowed": True, "reason": ""}
+
+    # Check blocked paths first
+    for pattern in agent.blocked_paths:
+        if fnmatch.fnmatch(file_path, pattern):
+            return {"allowed": False, "reason": f"File '{file_path}' matches blocked pattern '{pattern}'"}
+
+    # If allowed_paths is empty, everything not blocked is allowed
+    if not agent.allowed_paths:
+        return {"allowed": True, "reason": ""}
+
+    # Check allowed paths
+    for pattern in agent.allowed_paths:
+        if fnmatch.fnmatch(file_path, pattern):
+            return {"allowed": True, "reason": ""}
+
+    return {"allowed": False, "reason": f"File '{file_path}' not in allowed paths"}
+
+
+def _check_dimension_access(agent: AgentConfig, dimensions: list[str]) -> dict[str, Any]:
+    """Check if agent can operate on given dimensions.
+
+    Returns dict with 'allowed' (bool), 'restricted' (list), 'reason' (str).
+    """
+    if not dimensions:
+        return {"allowed": True, "restricted": [], "reason": ""}
+
+    restricted_hits = [d for d in dimensions if d in agent.restricted_dimensions]
+    if restricted_hits:
+        return {
+            "allowed": False,
+            "restricted": restricted_hits,
+            "reason": f"Dimensions {restricted_hits} require human approval",
+        }
+
+    # If allowed_dimensions is empty, all non-restricted are allowed
+    if not agent.allowed_dimensions:
+        return {"allowed": True, "restricted": [], "reason": ""}
+
+    denied = [d for d in dimensions if d not in agent.allowed_dimensions and d not in agent.restricted_dimensions]
+    if denied:
+        return {
+            "allowed": False,
+            "restricted": [],
+            "reason": f"Dimensions {denied} not in agent's allowed list",
+        }
+
+    return {"allowed": True, "restricted": [], "reason": ""}
+
+
+def _filter_decisions_by_context(
+    decisions: list[Decision],
+    agent: AgentConfig,
+) -> list[Decision]:
+    """Filter decisions based on agent's context_level and dimensions."""
+    # Filter by allowed dimensions if specified
+    if agent.allowed_dimensions:
+        allowed = set(agent.allowed_dimensions) | set(agent.restricted_dimensions)
+        decisions = [
+            d for d in decisions
+            if any(dim.value in allowed for dim in d.dimensions) or not d.dimensions
+        ]
+
+    # Apply context level
+    if agent.context_level == "minimal":
+        # Only return decisions involved in unresolved contradictions
+        # For now, return top 5 most recent
+        decisions = decisions[:5]
+    elif agent.context_level == "relevant":
+        decisions = decisions[:10]
+
+    return decisions
 
 
 def _detect_project() -> str:
