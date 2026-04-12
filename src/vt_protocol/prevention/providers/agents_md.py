@@ -16,7 +16,7 @@ def generate_agents_md(scored: list[ScoredDecision], project_name: str = "") -> 
     """Generate AGENTS.md content from scored decisions.
 
     Includes "always" tier decisions as primary rules, plus a summary
-    of "auto" tier decisions for reference.
+    of "auto" tier decisions for reference. Outputs imperative constraints.
     """
     always = [sd for sd in scored if sd.tier == "always"]
     auto = [sd for sd in scored if sd.tier == "auto"]
@@ -29,24 +29,27 @@ def generate_agents_md(scored: list[ScoredDecision], project_name: str = "") -> 
     lines.append("")
     lines.append("## Instructions for AI Agents")
     lines.append("")
-    lines.append("The following architectural decisions govern this project.")
-    lines.append("Follow these rules when making changes.")
+    lines.append("IMPORTANT: The following rules are binding governance constraints.")
+    lines.append("Follow them when making changes. Do not deviate without explicit approval.")
     lines.append("")
 
     if not always and not auto:
         lines.append("No architectural decisions recorded yet.")
         return "\n".join(lines)
 
-    # Always-active rules
+    # Always-active rules — imperative constraints
     if always:
         lines.append("## Core Rules (Always Active)")
         lines.append("")
         for i, sd in enumerate(always, 1):
             d = sd.decision
-            content = d.content.strip().replace("\n", " ")
-            if len(content) > 200:
-                content = content[:197] + "..."
-            lines.append(f"{i}. **{d.title}** — {content}")
+            if d.constraints:
+                rule_text = d.constraints[0]
+            else:
+                rule_text = d.content.strip().replace("\n", " ")
+                if len(rule_text) > 200:
+                    rule_text = rule_text[:197] + "..."
+            lines.append(f"{i}. {rule_text}")
         lines.append("")
 
     # Auto-attached rules (summary)
@@ -57,8 +60,14 @@ def generate_agents_md(scored: list[ScoredDecision], project_name: str = "") -> 
         lines.append("")
         for sd in auto:
             d = sd.decision
+            if d.constraints:
+                rule_text = d.constraints[0]
+            else:
+                rule_text = d.content.strip().replace("\n", " ")
+                if len(rule_text) > 200:
+                    rule_text = rule_text[:197] + "..."
             dims = ", ".join(dim.value for dim in d.dimensions)
-            lines.append(f"- **{d.title}** (applies to: {dims})")
+            lines.append(f"- {rule_text} *(applies to: {dims})*")
         lines.append("")
 
     return "\n".join(lines)

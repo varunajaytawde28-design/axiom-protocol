@@ -6,338 +6,462 @@
 <title>VT Protocol Dashboard</title>
 <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
 <style>
+/* ===== DESIGN TOKENS ===== */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-  --bg: #0a0a0f;
-  --bg-card: #111118;
-  --bg-surface: #1a1a24;
-  --border: #2a2a3a;
+  /* Backgrounds */
+  --bg: #08080C;
+  --bg-card: #12121A;
+  --bg-surface: #1a1a26;
+  --border: #1F1F2E;
+  --border-focus: #3a3a50;
+  /* Semantic */
+  --red: #F87171;
+  --amber: #FBBF24;
+  --green: #34D399;
+  --indigo: #818CF8;
+  --indigo-dim: rgba(129,140,248,0.08);
+  /* Categorical (graphs only, NEVER for buttons/status) */
+  --cat-cyan: #22d3ee;
+  --cat-orange: #fb923c;
+  --cat-pink: #f472b6;
+  /* Text */
   --text: #e4e4ef;
   --text-muted: #8888a0;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --green: #22c55e;
-  --red: #ef4444;
-  --amber: #f59e0b;
+  --text-dim: #555568;
+  /* Fonts */
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
+  /* Spacing & radius */
   --radius: 8px;
-  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --radius-sm: 4px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+  /* Density */
+  --row-h: 48px;
 }
+body.high-density { --row-h: 32px; --space-4: 10px; }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
-a { color: var(--accent); text-decoration: none; }
-a:hover { color: var(--accent-hover); }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13px; line-height: 1.5; }
+a { color: var(--indigo); text-decoration: none; }
+a:hover { color: #a5b4fc; }
+::selection { background: rgba(129,140,248,0.3); }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-/* Layout */
-.app { display: flex; height: 100vh; }
-.sidebar { width: 220px; background: var(--bg-card); border-right: 1px solid var(--border); padding: 16px 0; flex-shrink: 0; display: flex; flex-direction: column; }
-.sidebar-logo { padding: 0 16px 16px; font-size: 15px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
-.sidebar-logo span { color: var(--text-muted); font-weight: 400; font-size: 12px; display: block; margin-top: 2px; }
-.nav-item { padding: 8px 16px; cursor: pointer; font-size: 13px; color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 8px; }
+/* ===== LAYOUT SHELL ===== */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* Primary sidebar — 5 workspaces */
+.sidebar { width: 200px; background: var(--bg-card); border-right: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; z-index: 10; }
+.sidebar-logo { padding: 16px; font-size: 14px; font-weight: 700; color: var(--indigo); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.sidebar-logo .sub { color: var(--text-muted); font-weight: 400; font-size: 11px; display: block; margin-top: 2px; }
+.sidebar-nav { flex: 1; padding: 8px 0; }
+.nav-item { padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 10px; border-left: 3px solid transparent; }
 .nav-item:hover { background: var(--bg-surface); color: var(--text); }
-.nav-item.active { color: var(--accent); background: rgba(99,102,241,0.08); border-right: 2px solid var(--accent); }
-.nav-item .icon { width: 16px; text-align: center; }
-.nav-section { padding: 12px 16px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 600; }
+.nav-item.active { color: var(--indigo); background: var(--indigo-dim); border-left-color: var(--indigo); font-weight: 600; }
+.nav-item .icon { width: 18px; text-align: center; font-size: 14px; }
+.nav-item .badge { margin-left: auto; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center; }
+.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
+.sidebar-footer kbd { background: var(--bg-surface); border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; font-family: var(--mono); font-size: 10px; }
 
-/* Signal indicators */
-.signal-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
-.signal-dot.red { background: var(--red); box-shadow: 0 0 6px rgba(239,68,68,0.5); }
-.signal-dot.yellow { background: var(--amber); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
-.signal-dot.green { background: var(--green); box-shadow: 0 0 6px rgba(34,197,94,0.5); }
-.signal-row { display: flex; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-.signal-row:last-child { border-bottom: none; }
-.signal-name { font-weight: 600; font-size: 13px; flex: 1; }
-.signal-msg { font-size: 12px; color: var(--text-muted); flex: 2; }
-.signal-severity { font-size: 11px; font-weight: 600; text-transform: uppercase; min-width: 60px; text-align: right; }
-.signal-severity.critical { color: var(--red); }
-.signal-severity.warning { color: var(--amber); }
-.signal-severity.info { color: var(--text-muted); }
+/* Main content area */
+.main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.main-scroll { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
 
-/* Span rows */
-.span-row { display: grid; grid-template-columns: 120px 120px 1fr 80px 80px 80px; gap: 8px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px; }
-.span-row:last-child { border-bottom: none; }
-.span-row:hover { background: rgba(99,102,241,0.04); }
-.span-header { font-weight: 600; color: var(--text-muted); font-size: 11px; text-transform: uppercase; background: var(--bg-surface); }
-.span-id { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
-.main { flex: 1; overflow-y: auto; padding: 24px 32px; }
+/* ===== GOVERNANCE INTERNAL SIDEBAR ===== */
+.workspace-with-sidebar { display: flex; height: 100%; overflow: hidden; }
+.internal-sidebar { width: 180px; background: var(--bg); border-right: 1px solid var(--border); flex-shrink: 0; padding: 16px 0; overflow-y: auto; }
+.internal-nav { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--text-muted); border-radius: var(--radius-sm); margin: 2px 8px; transition: all 0.12s; }
+.internal-nav:hover { background: var(--bg-surface); color: var(--text); }
+.internal-nav.active { background: var(--indigo-dim); color: var(--indigo); font-weight: 600; }
+.internal-content { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
 
-/* Cards */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
-.card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 6px; }
-.card-value { font-size: 28px; font-weight: 700; }
+/* ===== LATTICE SPLIT PANE ===== */
+.lattice-layout { display: flex; height: 100%; overflow: hidden; }
+.lattice-filters { width: 20%; min-width: 180px; max-width: 260px; background: var(--bg); border-right: 1px solid var(--border); padding: var(--space-4); overflow-y: auto; flex-shrink: 0; }
+.lattice-feed { width: 40%; border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
+.lattice-detail { width: 40%; overflow-y: auto; background: var(--bg-card); }
+.lattice-detail-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 13px; }
+
+/* Filter panel */
+.filter-group { margin-bottom: 16px; }
+.filter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+.filter-select, .filter-input { width: 100%; padding: 6px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 12px; font-family: var(--font); outline: none; }
+.filter-select:focus, .filter-input:focus { border-color: var(--indigo); }
+
+/* Feed rows */
+.feed-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; min-height: var(--row-h); }
+.feed-row:hover { background: var(--bg-surface); }
+.feed-row.active { background: var(--indigo-dim); border-left: 3px solid var(--indigo); }
+.feed-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+.feed-icon.llm { background: rgba(129,140,248,0.15); color: var(--indigo); }
+.feed-icon.tool { background: rgba(52,211,153,0.15); color: var(--green); }
+.feed-icon.shell { background: rgba(251,191,36,0.15); color: var(--amber); }
+.feed-icon.git { background: rgba(248,113,113,0.15); color: var(--red); }
+.feed-icon.file { background: rgba(136,136,160,0.15); color: var(--text-muted); }
+.feed-body { flex: 1; min-width: 0; }
+.feed-title { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed-meta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.feed-time { font-size: 10px; color: var(--text-dim); font-family: var(--mono); flex-shrink: 0; }
+.feed-severity { font-size: 10px; font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
+.feed-severity.critical { color: var(--red); }
+.feed-severity.warning { color: var(--amber); }
+.feed-severity.info { color: var(--text-dim); }
+
+/* Detail pane tabs */
+.detail-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.detail-tab { padding: 10px 16px; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.detail-tab:hover { color: var(--text); }
+.detail-tab.active { color: var(--indigo); border-bottom-color: var(--indigo); }
+.detail-body { padding: var(--space-4); }
+
+/* ===== AXIOM TABS ===== */
+.axiom-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 var(--space-8); background: var(--bg-card); }
+.axiom-tab { padding: 12px 20px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.axiom-tab:hover { color: var(--text); }
+.axiom-tab.active { color: var(--indigo); border-bottom-color: var(--indigo); }
+.axiom-tab .count { display: inline-block; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+.axiom-content { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
+
+/* ===== CARDS ===== */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
+.card-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 4px; }
+.card-value { font-size: 28px; font-weight: 700; font-family: var(--mono); }
 .card-value.green { color: var(--green); }
 .card-value.red { color: var(--red); }
 .card-value.amber { color: var(--amber); }
-.card-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-.status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.status-badge.pass { background: rgba(34,197,94,0.15); color: var(--green); }
-.status-badge.fail { background: rgba(239,68,68,0.15); color: var(--red); }
-.status-badge.degraded { background: rgba(245,158,11,0.15); color: var(--amber); }
+.card-value.indigo { color: var(--indigo); }
+.card-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-/* Tables */
+/* Status badges with dual encoding (color + icon) */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge.critical { background: rgba(248,113,113,0.15); color: var(--red); }
+.badge.critical::before { content: '\26A0'; }
+.badge.warning { background: rgba(251,191,36,0.15); color: var(--amber); }
+.badge.warning::before { content: '\25D0'; }
+.badge.success { background: rgba(52,211,153,0.15); color: var(--green); }
+.badge.success::before { content: '\2713'; }
+.badge.info { background: rgba(129,140,248,0.12); color: var(--indigo); }
+.badge.neutral { background: rgba(136,136,160,0.1); color: var(--text-muted); }
+
+/* ===== BUTTONS ===== */
+.btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: all 0.15s; font-family: var(--font); }
+.btn:hover { border-color: var(--indigo); color: var(--indigo); }
+.btn.primary { background: var(--indigo); border-color: var(--indigo); color: #fff; }
+.btn.primary:hover { background: #6366f1; }
+.btn.danger { border-color: var(--red); color: var(--red); }
+.btn.danger:hover { background: rgba(248,113,113,0.1); }
+
+/* ===== TABLES ===== */
 .table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 10px 14px; background: var(--bg-surface); color: var(--text-muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+th { text-align: left; padding: 10px 14px; background: var(--bg-surface); color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
 td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(99,102,241,0.04); }
+tr:hover td { background: rgba(129,140,248,0.03); }
+tr { height: var(--row-h); }
 
-/* Dimension tags */
-.dim-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-right: 3px; background: rgba(99,102,241,0.12); color: var(--accent); }
+/* ===== CONTRADICTION RESOLUTION CARD ===== */
+.contra-full { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+.contra-full-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.contra-full-cols { display: grid; grid-template-columns: 1fr 1fr; }
+.contra-col { padding: 16px 20px; }
+.contra-col:first-child { border-right: 1px solid var(--border); }
+.contra-col-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
+.contra-col h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.contra-col .meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.contra-col pre { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; line-height: 1.6; }
+.contra-rationale { padding: 0 20px 12px; }
+.contra-rationale summary { cursor: pointer; font-size: 12px; color: var(--text-muted); font-weight: 600; padding: 8px 0; }
+.contra-rationale .text { font-size: 12px; color: var(--text-muted); line-height: 1.6; padding: 4px 0 8px; }
+.contra-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--bg-card); }
 
-/* Contradiction cards */
-.contra-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
-.contra-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.contra-verdict { font-weight: 700; text-transform: uppercase; font-size: 12px; }
-.contra-verdict.contradiction { color: var(--red); }
-.contra-verdict.tension { color: var(--amber); }
-.contra-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-.contra-side { padding: 10px; background: var(--bg-surface); border-radius: 6px; }
-.contra-side h4 { font-size: 13px; margin-bottom: 4px; }
-.contra-side p { font-size: 12px; color: var(--text-muted); }
-.contra-reasoning { font-size: 12px; color: var(--text-muted); padding: 8px; background: var(--bg-surface); border-radius: 6px; margin-bottom: 10px; }
-.contra-actions { display: flex; gap: 8px; }
+/* ===== DIMENSION TAGS ===== */
+.dim-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-right: 3px; }
 
-/* Buttons */
-.btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: all 0.15s; }
-.btn:hover { border-color: var(--accent); color: var(--accent); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.btn.primary:hover { background: var(--accent-hover); }
-.btn.danger { border-color: var(--red); color: var(--red); }
+/* ===== SIGNAL INDICATORS ===== */
+.signal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.signal-dot.red { background: var(--red); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
+.signal-dot.amber { background: var(--amber); box-shadow: 0 0 6px rgba(251,191,36,0.4); }
+.signal-dot.green { background: var(--green); box-shadow: 0 0 6px rgba(52,211,153,0.4); }
 
-/* Graph container */
-#graph-container { width: 100%; height: calc(100vh - 120px); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+/* ===== GRAPH ===== */
+.graph-container { width: 100%; height: calc(100vh - 160px); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 
-/* Audit entries */
-.audit-entry { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+/* ===== AUDIT ===== */
+.audit-entry { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; min-height: var(--row-h); }
 .audit-entry:last-child { border-bottom: none; }
-.audit-time { font-family: var(--mono); font-size: 11px; color: var(--text-muted); min-width: 160px; }
-.audit-type { font-weight: 600; min-width: 160px; }
-.audit-verify { font-size: 11px; padding: 2px 6px; border-radius: 3px; }
-.audit-verify.verified { background: rgba(34,197,94,0.15); color: var(--green); }
-.audit-verify.failed { background: rgba(239,68,68,0.15); color: var(--red); }
+.audit-time { font-family: var(--mono); font-size: 11px; color: var(--text-dim); min-width: 150px; }
+.audit-type { font-weight: 600; min-width: 150px; }
 
-/* Detail panel */
-.detail-panel { position: fixed; right: 0; top: 0; width: 400px; height: 100vh; background: var(--bg-card); border-left: 1px solid var(--border); padding: 20px; overflow-y: auto; transform: translateX(100%); transition: transform 0.2s; z-index: 100; }
-.detail-panel.open { transform: translateX(0); }
-.detail-close { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px; }
-.detail-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; padding-right: 30px; }
-.detail-section { margin-bottom: 14px; }
-.detail-label { font-size: 11px; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 4px; }
-.detail-text { font-size: 13px; line-height: 1.5; }
-
-/* Command palette */
-.cmd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+/* ===== COMMAND PALETTE ===== */
+.cmd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 18vh; backdrop-filter: blur(2px); }
 .cmd-overlay.open { display: flex; }
-.cmd-box { width: 500px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.cmd-input { width: 100%; padding: 14px 16px; background: transparent; border: none; color: var(--text); font-size: 15px; outline: none; border-bottom: 1px solid var(--border); }
-.cmd-results { max-height: 300px; overflow-y: auto; }
-.cmd-item { padding: 10px 16px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; }
-.cmd-item:hover, .cmd-item.selected { background: rgba(99,102,241,0.1); }
-.cmd-shortcut { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.cmd-box { width: 560px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.cmd-input { width: 100%; padding: 14px 16px; background: transparent; border: none; color: var(--text); font-size: 15px; font-family: var(--font); outline: none; border-bottom: 1px solid var(--border); }
+.cmd-input::placeholder { color: var(--text-dim); }
+.cmd-hint { padding: 6px 16px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.cmd-hint kbd { background: var(--bg-surface); border: 1px solid var(--border); padding: 0 3px; border-radius: 2px; font-family: var(--mono); font-size: 10px; margin: 0 2px; }
+.cmd-results { max-height: 340px; overflow-y: auto; }
+.cmd-item { padding: 10px 16px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; transition: background 0.08s; }
+.cmd-item:hover, .cmd-item.selected { background: var(--indigo-dim); }
+.cmd-item .cmd-label { display: flex; align-items: center; gap: 8px; }
+.cmd-shortcut { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+.cmd-icon { font-size: 14px; width: 20px; text-align: center; }
 
-/* Page titles */
-.page-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+/* ===== ASSUMPTION CARDS ===== */
+.assumption-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); margin-bottom: var(--space-3); }
+.assumption-card .header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.assumption-card .question-box { margin: 8px 0; padding: 10px; background: var(--bg); border-left: 3px solid var(--indigo); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.assumption-card .option { padding: 4px 8px; margin: 3px 0; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; transition: background 0.1s; }
+.assumption-card .option:hover { background: var(--bg-surface); }
+.assumption-card .option.selected { background: var(--green); color: #000; font-weight: 600; }
+.assumption-card .evidence { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; margin-top: 6px; }
 
-/* Responsive */
+/* ===== SECTION HEADINGS ===== */
+.page-title { font-size: 18px; font-weight: 700; margin-bottom: var(--space-6); }
+.section-title { font-size: 14px; font-weight: 600; margin-bottom: var(--space-3); color: var(--text-muted); }
+
+/* ===== PROGRESS BAR ===== */
+.progress-bar { height: 8px; background: var(--bg-surface); border-radius: 4px; overflow: hidden; margin-bottom: var(--space-4); }
+.progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.progress-fill.green { background: var(--green); }
+.progress-fill.amber { background: var(--amber); }
+.progress-fill.red { background: var(--red); }
+
+/* ===== COMPLIANCE FRAMEWORK CARDS ===== */
+.fw-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); cursor: pointer; transition: border-color 0.15s; }
+.fw-card:hover { border-color: var(--indigo); }
+.fw-card.alert { border-color: var(--red); }
+.fw-card .fw-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.fw-card .fw-status { font-size: 12px; }
+
+/* ===== AGENT CARDS ===== */
+.agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
+.agent-card .agent-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.agent-card .agent-role { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.drift-gauge { height: 6px; background: var(--bg-surface); border-radius: 3px; margin: 8px 0; position: relative; overflow: hidden; }
+.drift-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.permission-chip { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin: 2px; }
+.permission-chip.allow { background: rgba(52,211,153,0.15); color: var(--green); }
+.permission-chip.block { background: rgba(248,113,113,0.15); color: var(--red); }
+
+/* ===== RESPONSIVE — MOBILE TRIAGE ONLY ===== */
 @media (max-width: 768px) {
-  .sidebar { width: 60px; }
-  .sidebar-logo span, .nav-item span:not(.icon) { display: none; }
-  .main { padding: 16px; }
+  .sidebar { width: 56px; }
+  .sidebar-logo .sub, .nav-item span:not(.icon), .nav-item .badge, .sidebar-footer { display: none; }
+  .sidebar-logo { font-size: 12px; padding: 12px 8px; text-align: center; }
+  .nav-item { padding: 12px 0; justify-content: center; border-left: none; border-bottom: 2px solid transparent; }
+  .nav-item.active { border-bottom-color: var(--indigo); border-left-color: transparent; }
+  .main-scroll { padding: 16px; }
   .cards { grid-template-columns: repeat(2, 1fr); }
-  .contra-sides { grid-template-columns: 1fr; }
+  .contra-full-cols { grid-template-columns: 1fr; }
+  .contra-col:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  .lattice-layout { flex-direction: column; }
+  .lattice-filters { display: none; }
+  .lattice-feed { width: 100%; height: 50%; }
+  .lattice-detail { width: 100%; height: 50%; }
+  .workspace-with-sidebar .internal-sidebar { display: none; }
+  /* Hide non-essential workspaces */
+  [data-page="lattice"], [data-page="axiom"], [data-page="alignment"] { display: none !important; }
 }
+
+/* ===== HIGH DENSITY TOGGLE ===== */
+.density-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
+.density-toggle input { accent-color: var(--indigo); }
 </style>
 </head>
 <body>
 <div class="app">
-  <nav class="sidebar">
-    <div class="sidebar-logo">VT Protocol<span>Architecture Governance</span></div>
-    <div class="nav-item active" data-page="overview"><span class="icon">&#9776;</span> <span>Overview</span></div>
-    <div class="nav-section">Observation</div>
-    <div class="nav-item" data-page="signals"><span class="icon">&#9679;</span> <span>Signals</span></div>
-    <div class="nav-item" data-page="traces"><span class="icon">&#8596;</span> <span>Traces</span></div>
-    <div class="nav-item" data-page="provenance"><span class="icon">&#9733;</span> <span>Provenance</span></div>
-    <div class="nav-section">Governance</div>
-    <div class="nav-item" data-page="graph"><span class="icon">&#9670;</span> <span>Decision Graph</span></div>
-    <div class="nav-item" data-page="contradictions"><span class="icon">&#9888;</span> <span>Contradictions</span></div>
-    <div class="nav-item" data-page="audit"><span class="icon">&#9875;</span> <span>Audit Trail</span></div>
+  <!-- PRIMARY SIDEBAR — 5 workspaces -->
+  <nav class="sidebar" id="primary-sidebar">
+    <div class="sidebar-logo">VT Protocol<span class="sub">Governance</span></div>
+    <div class="sidebar-nav" id="sidebar-nav">
+      <div class="nav-item active" data-page="home"><span class="icon">&#9632;</span> <span>Home</span></div>
+      <div class="nav-item" data-page="lattice"><span class="icon">&#9670;</span> <span>Lattice</span></div>
+      <div class="nav-item" data-page="axiom"><span class="icon">&#9830;</span> <span>Axiom</span></div>
+      <div class="nav-item" data-page="alignment"><span class="icon">&#9733;</span> <span>Alignment</span></div>
+      <div class="nav-item" data-page="governance"><span class="icon">&#9881;</span> <span>Governance</span></div>
+    </div>
+    <div class="sidebar-footer"><kbd>&#8984;K</kbd> Command Palette</div>
   </nav>
-  <main class="main" id="main-content"></main>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-area" id="main-area"></div>
 </div>
 
-<!-- Detail panel -->
-<div class="detail-panel" id="detail-panel">
-  <button class="detail-close" onclick="closeDetail()">&times;</button>
-  <div id="detail-content"></div>
-</div>
-
-<!-- Command palette -->
+<!-- COMMAND PALETTE -->
 <div class="cmd-overlay" id="cmd-overlay">
   <div class="cmd-box">
-    <input class="cmd-input" id="cmd-input" placeholder="Type a command..." autocomplete="off">
+    <input class="cmd-input" id="cmd-input" placeholder="Type a command, @ agent, # search, or ? help..." autocomplete="off">
+    <div class="cmd-hint"><kbd>></kbd> commands <kbd>@</kbd> agents <kbd>#</kbd> search <kbd>?</kbd> help</div>
     <div class="cmd-results" id="cmd-results"></div>
   </div>
 </div>
 
 <script>
+/* ===== GLOBALS ===== */
 const API = '';
-let currentPage = 'overview';
+let currentWorkspace = 'home';
+let currentGovTab = 'agents';
+let currentAxiomTab = 'contradictions';
 let ws = null;
+let selectedTraceId = null;
 
-// --- Navigation ---
-document.querySelectorAll('.nav-item').forEach(item => {
-  item.addEventListener('click', () => {
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    item.classList.add('active');
-    currentPage = item.dataset.page;
-    loadPage(currentPage);
-  });
+/* ===== DIMENSION COLORS (categorical only) ===== */
+const DIM_COLORS = {
+  database:'#22d3ee', auth:'#f472b6', caching:'#fb923c', api_style:'#34D399',
+  deployment:'#818CF8', concurrency:'#a78bfa', logging:'#64748b', testing:'#22d3ee',
+  error_handling:'#F87171', state_management:'#fb923c', messaging:'#38bdf8', security:'#f472b6'
+};
+const ACTION_ICONS = { llm_call:'&#9674;', mcp_tool:'&#9881;', shell_command:'&#9002;', git_operation:'&#8646;', file_read:'&#9744;' };
+const ACTION_CLASSES = { llm_call:'llm', mcp_tool:'tool', shell_command:'shell', git_operation:'git', file_read:'file' };
+
+/* ===== HELPERS ===== */
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+function fmtTime(ts) { if (!ts) return ''; try { return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch { return ''; } }
+function fmtDate(ts) { if (!ts) return ''; try { return new Date(ts).toLocaleDateString(); } catch { return ''; } }
+function dimTag(dim) { const c = DIM_COLORS[dim] || '#818CF8'; return `<span class="dim-tag" style="background:${c}22;color:${c}">${dim}</span>`; }
+function severityBadge(sev) {
+  const map = { critical:'critical', high:'critical', warning:'warning', medium:'warning', low:'info', info:'info' };
+  return `<span class="badge ${map[sev] || 'neutral'}">${sev}</span>`;
+}
+function statusBadge(status) {
+  const map = { healthy:'success', degraded:'warning', critical:'critical', active:'success', superseded:'neutral',
+    unresolved:'critical', resolved:'success', deferred:'warning', ignored:'neutral',
+    proposed:'warning', validated:'success', rejected:'critical', detected:'info',
+    implemented:'success', partial:'warning', not_started:'neutral', diverged:'critical' };
+  return `<span class="badge ${map[status] || 'neutral'}">${status}</span>`;
+}
+
+/* ===== NAVIGATION ===== */
+document.querySelectorAll('#sidebar-nav .nav-item').forEach(item => {
+  item.addEventListener('click', () => navTo(item.dataset.page));
 });
 
-function loadPage(page) {
-  const main = document.getElementById('main-content');
-  closeDetail();
-  switch(page) {
-    case 'overview': loadOverview(main); break;
-    case 'signals': loadSignals(main); break;
-    case 'traces': loadTraces(main); break;
-    case 'provenance': loadProvenance(main); break;
-    case 'graph': loadGraph(main); break;
-    case 'contradictions': loadContradictions(main); break;
-    case 'audit': loadAudit(main); break;
+function navTo(page) {
+  document.querySelectorAll('#sidebar-nav .nav-item').forEach(i => i.classList.toggle('active', i.dataset.page === page));
+  currentWorkspace = page;
+  loadWorkspace(page);
+  closeCmdPalette();
+}
+
+function loadWorkspace(ws) {
+  const area = document.getElementById('main-area');
+  switch(ws) {
+    case 'home': loadHome(area); break;
+    case 'lattice': loadLattice(area); break;
+    case 'axiom': loadAxiom(area); break;
+    case 'alignment': loadAlignment(area); break;
+    case 'governance': loadGovernance(area); break;
   }
 }
 
-// --- Overview ---
-async function loadOverview(el) {
-  el.innerHTML = '<div class="page-title">Overview</div><div class="cards" id="health-cards"></div><div class="page-title" style="font-size:16px">Recent Decisions</div><div class="table-wrap"><table id="decisions-table"><thead><tr><th>Title</th><th>Type</th><th>Dimensions</th><th>Confidence</th><th>Created</th></tr></thead><tbody></tbody></table></div>';
+/* ===================================================================
+   HOME — Triage Dashboard
+   =================================================================== */
+async function loadHome(el) {
+  el.innerHTML = `<div class="main-scroll" id="home-scroll">
+    <div class="page-title">Home</div>
+    <div class="cards" id="home-cards"></div>
+    <div class="section-title">Urgent Triage</div>
+    <div id="home-triage"></div>
+    <div class="section-title" style="margin-top:24px">Golden Signals</div>
+    <div class="table-wrap" id="home-signals"></div>
+  </div>`;
   try {
-    const [health, decisions] = await Promise.all([
-      fetch(API + '/api/health').then(r => r.json()),
-      fetch(API + '/api/decisions?limit=20').then(r => r.json())
-    ]);
-    renderHealthCards(health);
-    renderDecisionsTable(decisions.decisions);
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load data: ' + e.message + '</p>'; }
+    const data = await fetch(API + '/api/home').then(r => r.json());
+    renderHomeCards(data.health);
+    renderHomeTriage(data.triage);
+    renderHomeSignals(data.signals);
+  } catch(e) {
+    // Fallback to /api/health if /api/home not available
+    try {
+      const [health, contras] = await Promise.all([
+        fetch(API + '/api/health').then(r => r.json()),
+        fetch(API + '/api/contradictions').then(r => r.json()),
+      ]);
+      renderHomeCards({
+        coherence_score: health.coherence_score, status: health.status,
+        total_decisions: health.total_decisions, active_decisions: health.active_decisions,
+        open_contradictions: health.actionable_contradictions,
+        highest_drift: {agent:'none', score:0}, anomalous_llm_calls: 0, pending_assumptions: 0
+      });
+      renderHomeTriage({ total: contras.total, contradictions: contras.contradictions.slice(0, 5) });
+      renderHomeSignals([]);
+    } catch(e2) { document.getElementById('home-scroll').innerHTML += `<p style="color:var(--red)">Failed to load: ${esc(e2.message)}</p>`; }
+  }
 }
 
-function renderHealthCards(h) {
-  const cards = document.getElementById('health-cards');
-  const statusCls = h.status === 'healthy' ? 'pass' : 'degraded';
-  const coherenceCls = h.coherence_score >= 0.8 ? 'green' : h.coherence_score >= 0.5 ? 'amber' : 'red';
+function renderHomeCards(h) {
+  const cards = document.getElementById('home-cards');
+  const ccls = h.coherence_score >= 0.8 ? 'green' : h.coherence_score >= 0.5 ? 'amber' : 'red';
+  const driftCls = h.highest_drift.score >= 0.7 ? 'red' : h.highest_drift.score >= 0.4 ? 'amber' : 'green';
   cards.innerHTML = `
-    <div class="card"><div class="card-label">Status</div><span class="status-badge ${statusCls}">${h.status.toUpperCase()}</span></div>
-    <div class="card"><div class="card-label">Coherence</div><div class="card-value ${coherenceCls}">${Math.round(h.coherence_score * 100)}%</div></div>
-    <div class="card"><div class="card-label">Decisions</div><div class="card-value">${h.active_decisions}</div><div class="card-sub">${h.total_decisions} total</div></div>
-    <div class="card"><div class="card-label">Contradictions</div><div class="card-value ${h.actionable_contradictions > 0 ? 'red' : 'green'}">${h.actionable_contradictions}</div><div class="card-sub">actionable</div></div>
-    <div class="card"><div class="card-label">Audit Entries</div><div class="card-value">${h.audit_entries}</div></div>
+    <div class="card"><div class="card-label">Coherence</div><div class="card-value ${ccls}">${Math.round(h.coherence_score*100)}%</div><div class="card-sub">${statusBadge(h.status)}</div></div>
+    <div class="card"><div class="card-label">Open Critical</div><div class="card-value ${h.open_contradictions ? 'red' : 'green'}">${h.open_contradictions}</div><div class="card-sub">contradictions</div></div>
+    <div class="card"><div class="card-label">Highest Drift</div><div class="card-value ${driftCls}" style="font-size:18px">${esc(h.highest_drift.agent)}</div><div class="card-sub">${h.highest_drift.score.toFixed(2)} drift</div></div>
+    <div class="card"><div class="card-label">LLM Anomalies</div><div class="card-value ${h.anomalous_llm_calls ? 'amber' : 'green'}">${h.anomalous_llm_calls}</div><div class="card-sub">flagged calls</div></div>
   `;
 }
 
-function renderDecisionsTable(decisions) {
-  const tbody = document.querySelector('#decisions-table tbody');
-  tbody.innerHTML = decisions.map(d => `
-    <tr style="cursor:pointer" onclick="showDecision('${d.id}')">
-      <td>${esc(d.title)}</td>
-      <td>${d.decision_type}</td>
-      <td>${d.dimensions.map(dim => '<span class="dim-tag">' + dim + '</span>').join('')}</td>
-      <td>${Math.round(d.confidence * 100)}%</td>
-      <td>${new Date(d.created_at).toLocaleDateString()}</td>
-    </tr>
-  `).join('');
+function renderHomeTriage(triage) {
+  const el = document.getElementById('home-triage');
+  if (!triage.contradictions || !triage.contradictions.length) {
+    el.innerHTML = '<div class="card" style="text-align:center;color:var(--green);padding:20px"><span class="badge success">All Clear</span> No unresolved contradictions</div>';
+    return;
+  }
+  el.innerHTML = triage.contradictions.map(c => renderContraCard(c)).join('');
 }
 
-// --- Decision Detail ---
-async function showDecision(id) {
-  try {
-    const d = await fetch(API + '/api/decisions/' + id).then(r => r.json());
-    const panel = document.getElementById('detail-panel');
-    document.getElementById('detail-content').innerHTML = `
-      <div class="detail-title">${esc(d.title)}</div>
-      <div class="detail-section"><div class="detail-label">Type</div><div class="detail-text">${d.decision_type}</div></div>
-      <div class="detail-section"><div class="detail-label">Dimensions</div><div class="detail-text">${d.dimensions.map(dim => '<span class="dim-tag">' + dim + '</span>').join(' ')}</div></div>
-      <div class="detail-section"><div class="detail-label">Content</div><div class="detail-text">${esc(d.content)}</div></div>
-      <div class="detail-section"><div class="detail-label">Rationale</div><div class="detail-text">${esc(d.rationale || 'None')}</div></div>
-      <div class="detail-section"><div class="detail-label">Confidence</div><div class="detail-text">${Math.round(d.confidence * 100)}%</div></div>
-      <div class="detail-section"><div class="detail-label">Source</div><div class="detail-text">${d.source_type} / ${d.made_by}</div></div>
-      ${d.alternatives && d.alternatives.length ? '<div class="detail-section"><div class="detail-label">Alternatives</div><div class="detail-text">' + d.alternatives.join(', ') + '</div></div>' : ''}
-      ${d.related_contradictions && d.related_contradictions.length ? '<div class="detail-section"><div class="detail-label">Related Contradictions</div>' + d.related_contradictions.map(c => '<div class="contra-card" style="margin-top:6px"><span class="contra-verdict ' + c.verdict + '">' + c.verdict + '</span> vs ' + esc(c.decision_a_title === d.title ? c.decision_b_title : c.decision_a_title) + '</div>').join('') + '</div>' : ''}
-    `;
-    panel.classList.add('open');
-  } catch(e) { console.error(e); }
-}
-
-function closeDetail() { document.getElementById('detail-panel').classList.remove('open'); }
-
-// --- Graph ---
-async function loadGraph(el) {
-  el.innerHTML = '<div class="page-title">Decision Graph</div><div id="graph-container"></div>';
-  try {
-    const data = await fetch(API + '/api/graph').then(r => r.json());
-    renderGraph(data);
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load graph</p>'; }
-}
-
-const DIM_COLORS = {
-  database: '#6366f1', auth: '#ec4899', caching: '#f59e0b', api_style: '#22c55e',
-  deployment: '#3b82f6', concurrency: '#a855f7', logging: '#64748b', testing: '#14b8a6',
-  error_handling: '#f87171', state_management: '#fb923c', messaging: '#38bdf8', security: '#ef4444'
-};
-
-function renderGraph(data) {
-  const elements = [];
-  data.nodes.forEach(n => {
-    const dim = n.data.dimensions[0] || 'database';
-    elements.push({ data: { ...n.data, color: DIM_COLORS[dim] || '#6366f1' } });
-  });
-  data.edges.forEach(e => {
-    const color = e.data.type === 'CONTRADICTION' ? '#ef4444' : e.data.type === 'TENSION' ? '#f59e0b' : e.data.type === 'SUPERSEDES' ? '#8888a0' : '#2a2a3a';
-    elements.push({ data: { ...e.data, color } });
-  });
-  const cy = cytoscape({
-    container: document.getElementById('graph-container'),
-    elements,
-    style: [
-      { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': '#e4e4ef', 'text-outline-color': '#0a0a0f', 'text-outline-width': 2, 'width': 30, 'height': 30 } },
-      { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 1.5, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.7 } },
-      { selector: 'edge[type="SHARED_DIMENSION"]', style: { 'target-arrow-shape': 'none', 'line-style': 'dotted', 'width': 1, 'opacity': 0.4 } }
-    ],
-    layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, idealEdgeLength: 120 }
-  });
-  cy.on('tap', 'node', e => showDecision(e.target.data('id')));
-}
-
-// --- Contradictions ---
-async function loadContradictions(el) {
-  el.innerHTML = '<div class="page-title">Contradictions</div><div id="contra-list"></div>';
-  try {
-    const data = await fetch(API + '/api/contradictions').then(r => r.json());
-    renderContradictions(data.contradictions);
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load contradictions</p>'; }
-}
-
-function renderContradictions(contras) {
-  const list = document.getElementById('contra-list');
-  if (!contras.length) { list.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:var(--green)">No unresolved contradictions. Architecture is clean.</div>'; return; }
-  list.innerHTML = contras.map(c => `
-    <div class="contra-card">
-      <div class="contra-header">
-        <span class="contra-verdict ${c.verdict}">${c.verdict.toUpperCase()}</span>
-        <span style="font-size:12px;color:var(--text-muted)">Confidence: ${Math.round(c.confidence * 100)}%</span>
+function renderContraCard(c) {
+  return `<div class="contra-full">
+    <div class="contra-full-header">
+      ${severityBadge(c.verdict === 'contradiction' ? 'critical' : 'warning')}
+      <span style="font-weight:600;flex:1">${esc(c.decision_a_title)} vs ${esc(c.decision_b_title)}</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)">${Math.round(c.confidence*100)}% NLI</span>
+    </div>
+    <div class="contra-full-cols">
+      <div class="contra-col">
+        <div class="contra-col-label">Decision A</div>
+        <h4>${esc(c.decision_a_title)}</h4>
+        <div class="meta">${(c.shared_dimensions||[]).map(d => dimTag(d)).join(' ')}</div>
+        <pre>${esc(c.evidence_a)}</pre>
       </div>
-      <div class="contra-sides">
-        <div class="contra-side"><h4>${esc(c.decision_a_title)}</h4><p>${esc(c.evidence_a)}</p></div>
-        <div class="contra-side"><h4>${esc(c.decision_b_title)}</h4><p>${esc(c.evidence_b)}</p></div>
-      </div>
-      <div class="contra-reasoning">${esc(c.reasoning)}</div>
-      <div class="contra-actions">
-        <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_a_id}','Pick A')">Pick A</button>
-        <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_b_id}','Pick B')">Pick B</button>
-        <button class="btn danger" onclick="resolveContra('${c.id}','dismiss','Dismissed')">Dismiss</button>
+      <div class="contra-col">
+        <div class="contra-col-label">Decision B</div>
+        <h4>${esc(c.decision_b_title)}</h4>
+        <div class="meta">${(c.shared_dimensions||[]).map(d => dimTag(d)).join(' ')}</div>
+        <pre>${esc(c.evidence_b)}</pre>
       </div>
     </div>
-  `).join('');
+    <div class="contra-rationale"><details><summary>View Rationale</summary><div class="text">${esc(c.reasoning)}</div></details></div>
+    <div class="contra-footer">
+      <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_a_id}','Accept A')">Accept A</button>
+      <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_b_id}','Accept B')">Accept B</button>
+      <button class="btn" onclick="resolveContra('${c.id}','both','Both Stay')">Both Stay</button>
+      <button class="btn danger" onclick="resolveContra('${c.id}','exception','Create Exception')">Create Exception</button>
+    </div>
+  </div>`;
+}
+
+function renderHomeSignals(signals) {
+  const el = document.getElementById('home-signals');
+  if (!signals || !signals.length) {
+    el.innerHTML = '<div style="padding:14px;color:var(--text-dim)">No signal data available.</div>';
+    return;
+  }
+  el.innerHTML = signals.map(s => {
+    const dotCls = s.status === 'red' ? 'red' : s.status === 'yellow' ? 'amber' : 'green';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border)">
+      <span class="signal-dot ${dotCls}"></span>
+      <span style="flex:1;font-weight:500">${esc(s.signal.replace(/_/g,' '))}</span>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${s.count}</span>
+    </div>`;
+  }).join('');
 }
 
 async function resolveContra(id, winnerId, rationale) {
@@ -346,165 +470,554 @@ async function resolveContra(id, winnerId, rationale) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ winner_id: winnerId, rationale })
     });
-    loadContradictions(document.getElementById('main-content'));
-  } catch(e) { alert('Failed to resolve: ' + e.message); }
+    loadWorkspace(currentWorkspace);
+  } catch(e) { alert('Failed: ' + e.message); }
 }
 
-// --- Audit ---
-async function loadAudit(el) {
-  el.innerHTML = '<div class="page-title">Audit Trail</div><div style="margin-bottom:12px"><button class="btn" onclick="loadAuditVerified()">Verify All Proofs</button></div><div class="table-wrap" id="audit-list"></div>';
+/* ===================================================================
+   LATTICE — Unified Observation (Filter + Feed + Detail)
+   =================================================================== */
+async function loadLattice(el) {
+  el.innerHTML = `<div class="lattice-layout">
+    <div class="lattice-filters" id="lattice-filters">
+      <div style="font-weight:700;font-size:13px;margin-bottom:12px">Filters</div>
+      <div class="filter-group"><div class="filter-label">Action Type</div>
+        <select class="filter-select" id="lf-action" onchange="applyLatticeFilters()">
+          <option value="">All</option><option value="llm_call">LLM Call</option><option value="mcp_tool">MCP Tool</option>
+          <option value="shell_command">Shell</option><option value="git_operation">Git</option><option value="file_read">File Read</option>
+        </select></div>
+      <div class="filter-group"><div class="filter-label">Agent</div>
+        <select class="filter-select" id="lf-agent" onchange="applyLatticeFilters()"><option value="">All</option></select></div>
+      <div class="filter-group"><div class="filter-label">Severity</div>
+        <select class="filter-select" id="lf-severity" onchange="applyLatticeFilters()">
+          <option value="">All</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option>
+        </select></div>
+      <div class="filter-group"><div class="filter-label">Search</div>
+        <input class="filter-input" id="lf-search" placeholder="trace id, model..." oninput="applyLatticeFilters()"></div>
+      <div class="density-toggle" style="margin-top:12px"><input type="checkbox" id="density-toggle" onchange="document.body.classList.toggle('high-density',this.checked)"> <span>High Density</span></div>
+    </div>
+    <div class="lattice-feed" id="lattice-feed"><div style="padding:20px;color:var(--text-dim)">Loading traces...</div></div>
+    <div class="lattice-detail" id="lattice-detail"><div class="lattice-detail-empty">Select a trace to view details</div></div>
+  </div>`;
   try {
-    const data = await fetch(API + '/api/audit?limit=100').then(r => r.json());
-    renderAudit(data.entries);
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load audit trail</p>'; }
+    const data = await fetch(API + '/api/traces?limit=200').then(r => r.json());
+    window._latticeData = data;
+    // Populate agent filter
+    const agents = new Set();
+    (data.entries || data.spans || []).forEach(e => { if (e.agent_id) agents.add(e.agent_id); });
+    const agentSel = document.getElementById('lf-agent');
+    agents.forEach(a => { const o = document.createElement('option'); o.value = a; o.text = a; agentSel.add(o); });
+    renderLatticeFeed(data.entries || data.spans || []);
+  } catch(e) { document.getElementById('lattice-feed').innerHTML = `<div style="padding:20px;color:var(--red)">Failed: ${esc(e.message)}</div>`; }
 }
 
-async function loadAuditVerified() {
+function applyLatticeFilters() {
+  if (!window._latticeData) return;
+  let entries = window._latticeData.entries || window._latticeData.spans || [];
+  const action = document.getElementById('lf-action').value;
+  const agent = document.getElementById('lf-agent').value;
+  const severity = document.getElementById('lf-severity').value;
+  const search = document.getElementById('lf-search').value.toLowerCase();
+  if (action) entries = entries.filter(e => e.action_type === action);
+  if (agent) entries = entries.filter(e => e.agent_id === agent);
+  if (severity) entries = entries.filter(e => e.severity === severity);
+  if (search) entries = entries.filter(e => JSON.stringify(e).toLowerCase().includes(search));
+  renderLatticeFeed(entries);
+}
+
+function renderLatticeFeed(entries) {
+  const feed = document.getElementById('lattice-feed');
+  if (!entries.length) { feed.innerHTML = '<div style="padding:20px;color:var(--text-dim)">No traces match filters.</div>'; return; }
+  feed.innerHTML = entries.map(e => {
+    const type = e.action_type || 'llm_call';
+    const icon = ACTION_ICONS[type] || '&#9679;';
+    const cls = ACTION_CLASSES[type] || 'file';
+    const title = e.summary || e.tool_name || e.model || type;
+    const isActive = selectedTraceId === (e.entry_id || e.span_id) ? ' active' : '';
+    return `<div class="feed-row${isActive}" onclick="selectTrace(this, ${esc("'" + JSON.stringify(e).replace(/'/g, "\\'") + "'")})" data-id="${e.entry_id || e.span_id}">
+      <div class="feed-icon ${cls}">${icon}</div>
+      <div class="feed-body">
+        <div class="feed-title">${esc(title)}</div>
+        <div class="feed-meta">${esc(e.agent_id || '')} ${e.duration_ms ? '&middot; ' + e.duration_ms + 'ms' : ''}</div>
+      </div>
+      <span class="feed-severity ${e.severity || 'info'}">${e.severity || 'info'}</span>
+      <span class="feed-time">${fmtTime(e.timestamp)}</span>
+    </div>`;
+  }).join('');
+}
+
+function selectTrace(rowEl, jsonStr) {
+  document.querySelectorAll('.feed-row.active').forEach(r => r.classList.remove('active'));
+  rowEl.classList.add('active');
+  let entry;
+  try { entry = JSON.parse(jsonStr); } catch { return; }
+  selectedTraceId = entry.entry_id || entry.span_id;
+  renderTraceDetail(entry);
+}
+
+function renderTraceDetail(e) {
+  const det = document.getElementById('lattice-detail');
+  const details = e.details || {};
+  det.innerHTML = `
+    <div class="detail-tabs">
+      <div class="detail-tab active" onclick="showDetailTab(this,'trace-tab')">Trace Detail</div>
+      <div class="detail-tab" onclick="showDetailTab(this,'prov-tab')">Provenance</div>
+    </div>
+    <div id="trace-tab" class="detail-body">
+      <div style="margin-bottom:12px"><span class="badge info">${esc(e.action_type || 'llm_call')}</span> ${severityBadge(e.severity || 'info')}</div>
+      <div style="margin-bottom:8px;font-weight:600;font-size:14px">${esc(e.summary || e.tool_name || '')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div class="card"><div class="card-label">Agent</div><div style="font-family:var(--mono);font-size:12px">${esc(e.agent_id || 'unknown')}</div></div>
+        <div class="card"><div class="card-label">Duration</div><div style="font-family:var(--mono);font-size:12px">${e.duration_ms || 0}ms</div></div>
+        ${details.model ? `<div class="card"><div class="card-label">Model</div><div style="font-family:var(--mono);font-size:12px">${esc(details.model)}</div></div>` : ''}
+        ${details.provider ? `<div class="card"><div class="card-label">Provider</div><div style="font-family:var(--mono);font-size:12px">${esc(details.provider)}</div></div>` : ''}
+        ${details.tokens_in != null ? `<div class="card"><div class="card-label">Tokens In</div><div style="font-family:var(--mono);font-size:12px">${details.tokens_in}</div></div>` : ''}
+        ${details.tokens_out != null ? `<div class="card"><div class="card-label">Tokens Out</div><div style="font-family:var(--mono);font-size:12px">${details.tokens_out}</div></div>` : ''}
+        ${details.cost_usd != null ? `<div class="card"><div class="card-label">Cost</div><div style="font-family:var(--mono);font-size:12px">$${details.cost_usd.toFixed(4)}</div></div>` : ''}
+      </div>
+      <div class="section-title">Timestamp</div>
+      <div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${e.timestamp || ''}</div>
+      ${details.command ? `<div class="section-title">Command</div><pre style="font-family:var(--mono);font-size:11px;background:var(--bg);padding:8px;border-radius:4px;margin-bottom:12px;overflow-x:auto">${esc(details.command)}</pre>` : ''}
+      ${details.file_path ? `<div class="section-title">File</div><div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${esc(details.file_path)}</div>` : ''}
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">ID: ${esc(e.entry_id || e.span_id || '')}</div>
+    </div>
+    <div id="prov-tab" class="detail-body" style="display:none">
+      <div style="color:var(--text-dim);padding:20px;text-align:center">Provenance graph for this trace. <br>Run agent sessions to capture causal links.</div>
+      <div id="trace-prov-graph" style="height:300px;background:var(--bg);border-radius:var(--radius)"></div>
+    </div>
+  `;
+}
+
+function showDetailTab(tabEl, tabId) {
+  tabEl.parentElement.querySelectorAll('.detail-tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  tabEl.parentElement.parentElement.querySelectorAll('.detail-body').forEach(b => b.style.display = 'none');
+  document.getElementById(tabId).style.display = 'block';
+}
+
+/* ===================================================================
+   AXIOM — Contradictions + Decision Ledger
+   =================================================================== */
+async function loadAxiom(el) {
+  const contraCount = await fetch(API + '/api/contradictions?status=unresolved').then(r => r.json()).then(d => d.total).catch(() => 0);
+  el.innerHTML = `
+    <div class="axiom-tabs">
+      <div class="axiom-tab active" data-tab="contradictions" onclick="switchAxiomTab(this,'contradictions')">Contradictions ${contraCount ? `<span class="count">${contraCount}</span>` : ''}</div>
+      <div class="axiom-tab" data-tab="ledger" onclick="switchAxiomTab(this,'ledger')">Decision Ledger</div>
+    </div>
+    <div class="axiom-content" id="axiom-content"></div>
+  `;
+  currentAxiomTab = 'contradictions';
+  loadAxiomContradictions();
+}
+
+function switchAxiomTab(tabEl, tab) {
+  tabEl.parentElement.querySelectorAll('.axiom-tab').forEach(t => t.classList.remove('active'));
+  tabEl.classList.add('active');
+  currentAxiomTab = tab;
+  if (tab === 'contradictions') loadAxiomContradictions();
+  else loadAxiomLedger();
+}
+
+async function loadAxiomContradictions() {
+  const el = document.getElementById('axiom-content');
+  el.innerHTML = '<div style="color:var(--text-dim)">Loading...</div>';
   try {
-    const data = await fetch(API + '/api/audit?limit=100&verify=true').then(r => r.json());
-    renderAudit(data.entries);
+    const data = await fetch(API + '/api/contradictions').then(r => r.json());
+    if (!data.contradictions.length) {
+      el.innerHTML = '<div class="card" style="text-align:center;padding:24px"><span class="badge success">Clean</span> No unresolved contradictions.</div>';
+      return;
+    }
+    el.innerHTML = data.contradictions.map(c => renderContraCard(c)).join('');
+  } catch(e) { el.innerHTML = `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+async function loadAxiomLedger() {
+  const el = document.getElementById('axiom-content');
+  el.innerHTML = '<div class="section-title">Decision Timeline</div><div class="graph-container" id="ledger-graph"></div>';
+  try {
+    const data = await fetch(API + '/api/graph').then(r => r.json());
+    if (!data.nodes.length) {
+      el.innerHTML = '<div class="card" style="text-align:center;padding:24px;color:var(--text-dim)">No decisions recorded yet.</div>';
+      return;
+    }
+    // Swimlane-style: group nodes by agent, plot on time axis
+    const elements = [];
+    data.nodes.forEach(n => {
+      const dim = (n.data.dimensions || [])[0] || 'database';
+      elements.push({ data: { ...n.data, color: DIM_COLORS[dim] || '#818CF8' } });
+    });
+    data.edges.forEach(e => {
+      const color = e.data.type === 'CONTRADICTION' ? '#F87171' : e.data.type === 'TENSION' ? '#FBBF24' : e.data.type === 'SUPERSEDES' ? '#8888a0' : '#1F1F2E';
+      const style = e.data.type === 'SHARED_DIMENSION' ? 'dotted' : 'solid';
+      elements.push({ data: { ...e.data, color, lineStyle: style } });
+    });
+    const cy = cytoscape({
+      container: document.getElementById('ledger-graph'), elements,
+      style: [
+        { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': '#e4e4ef', 'text-outline-color': '#08080C', 'text-outline-width': 2, 'width': 28, 'height': 28, 'font-family': 'Inter, sans-serif' } },
+        { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 1.5, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.7 } },
+        { selector: 'edge[type="SHARED_DIMENSION"]', style: { 'target-arrow-shape': 'none', 'line-style': 'dotted', 'width': 1, 'opacity': 0.3 } }
+      ],
+      layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, idealEdgeLength: 120 }
+    });
+    cy.on('tap', 'node', e => showDecisionModal(e.target.data('id')));
+  } catch(e) { el.innerHTML = `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+async function showDecisionModal(id) {
+  try {
+    const d = await fetch(API + '/api/decisions/' + id).then(r => r.json());
+    const det = document.getElementById('lattice-detail') || document.getElementById('axiom-content');
+    // Simple inline display — reuse available space
+    alert(`${d.title}\n\nType: ${d.decision_type}\nDimensions: ${d.dimensions.join(', ')}\nConfidence: ${Math.round(d.confidence*100)}%\n\n${d.content}`);
   } catch(e) { console.error(e); }
 }
 
-function renderAudit(entries) {
-  const list = document.getElementById('audit-list');
-  if (!entries.length) { list.innerHTML = '<div style="padding:16px;color:var(--text-muted)">No audit entries yet.</div>'; return; }
-  list.innerHTML = entries.map(e => `
-    <div class="audit-entry">
-      <span class="audit-time">${new Date(e.timestamp).toLocaleString()}</span>
-      <span class="audit-type">${e.event_type}</span>
-      <span>${esc(e.actor)}</span>
-      <span style="flex:1;font-size:12px;color:var(--text-muted)">${esc(JSON.stringify(e.payload).slice(0, 80))}</span>
-      ${e.verified !== null ? '<span class="audit-verify ' + (e.verified ? 'verified' : 'failed') + '">' + (e.verified ? 'Verified' : 'Failed') + '</span>' : ''}
-    </div>
-  `).join('');
-}
-
-// --- Signals (Traffic Light) ---
-async function loadSignals(el) {
-  el.innerHTML = '<div class="page-title">Signals</div><div class="cards" id="signal-cards"></div><div class="page-title" style="font-size:16px">Signal Details</div><div class="table-wrap" id="signal-list"></div>';
+/* ===================================================================
+   ALIGNMENT — Living Specs + API Contracts
+   =================================================================== */
+async function loadAlignment(el) {
+  el.innerHTML = `<div class="main-scroll">
+    <div class="page-title">Alignment</div>
+    <div id="alignment-progress"></div>
+    <div class="section-title">Living Specs</div>
+    <div id="alignment-specs" class="table-wrap" style="margin-bottom:24px"></div>
+    <div class="section-title">API Contracts</div>
+    <div id="alignment-contracts"></div>
+    <div style="margin-top:16px"><a href="#" onclick="event.preventDefault();loadAlignmentAnalytics()" style="font-size:12px">View Analytics &rarr;</a></div>
+  </div>`;
   try {
-    const [signals, secrets, scopeCreep] = await Promise.all([
-      fetch(API + '/api/signals').then(r => r.json()),
-      fetch(API + '/api/secrets').then(r => r.json()),
-      fetch(API + '/api/scope-creep').then(r => r.json()),
+    const [specs, contracts] = await Promise.all([
+      fetch(API + '/api/specs').then(r => r.json()).catch(() => ({ total_specs:0, total_requirements:0, coverage_percent:0, specs:[], coverage_reports:[] })),
+      fetch(API + '/api/contracts').then(r => r.json()).catch(() => ({ total_endpoints:0, violation_count:0, consistency_score:1, services:[], violations:[] })),
     ]);
-    const statusCls = signals.status;
-    const cards = document.getElementById('signal-cards');
-    cards.innerHTML = `
-      <div class="card"><div class="card-label">Overall Status</div><div class="card-value"><span class="signal-dot ${statusCls}"></span>${signals.status.toUpperCase()}</div></div>
-      <div class="card"><div class="card-label">Critical</div><div class="card-value ${signals.critical.length ? 'red' : 'green'}">${signals.critical.length}</div></div>
-      <div class="card"><div class="card-label">Warnings</div><div class="card-value ${signals.warning.length ? 'amber' : 'green'}">${signals.warning.length}</div></div>
-      <div class="card"><div class="card-label">Info</div><div class="card-value">${signals.info.length}</div></div>
-      <div class="card"><div class="card-label">Secrets</div><div class="card-value ${secrets.status === 'alert' ? 'red' : 'green'}">${secrets.total_matches}</div><div class="card-sub">${secrets.status}</div></div>
-      <div class="card"><div class="card-label">Scope Creep</div><div class="card-value ${scopeCreep.total_alerts ? 'amber' : 'green'}">${scopeCreep.total_alerts}</div><div class="card-sub">alerts</div></div>
-    `;
-    const list = document.getElementById('signal-list');
-    const allSignals = [...signals.critical, ...signals.warning, ...signals.info];
-    if (!allSignals.length) {
-      list.innerHTML = '<div style="padding:16px;color:var(--green)">All signals green. No issues detected.</div>';
-    } else {
-      list.innerHTML = allSignals.map(s => `
-        <div class="signal-row">
-          <span class="signal-dot ${s.severity === 'critical' ? 'red' : s.severity === 'warning' ? 'yellow' : 'green'}"></span>
-          <span class="signal-name">${esc(s.name)}</span>
-          <span class="signal-msg">${esc(s.message)}</span>
-          <span class="signal-severity ${s.severity}">${s.severity}</span>
-        </div>
-      `).join('');
-    }
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load signals: ' + e.message + '</p>'; }
+    renderAlignmentProgress(specs);
+    renderAlignmentSpecs(specs);
+    renderAlignmentContracts(contracts);
+  } catch(e) { el.querySelector('.main-scroll').innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
 }
 
-// --- Traces (LLM Call Feed) ---
-async function loadTraces(el) {
-  el.innerHTML = '<div class="page-title">Traces</div><div class="cards" id="trace-cards"></div><div class="page-title" style="font-size:16px">LLM Call Feed</div><div class="table-wrap" id="trace-list"></div>';
-  try {
-    const data = await fetch(API + '/api/traces?limit=100').then(r => r.json());
-    const cards = document.getElementById('trace-cards');
-    cards.innerHTML = `
-      <div class="card"><div class="card-label">Total Spans</div><div class="card-value">${data.total}</div></div>
-      <div class="card"><div class="card-label">Total Cost</div><div class="card-value">$${data.summary.total_cost_usd.toFixed(4)}</div></div>
-      <div class="card"><div class="card-label">Tokens In</div><div class="card-value">${data.summary.total_tokens_in.toLocaleString()}</div></div>
-      <div class="card"><div class="card-label">Tokens Out</div><div class="card-value">${data.summary.total_tokens_out.toLocaleString()}</div></div>
-      <div class="card"><div class="card-label">Providers</div><div class="card-value" style="font-size:14px">${data.summary.providers.join(', ') || 'None'}</div></div>
-    `;
-    const list = document.getElementById('trace-list');
-    if (!data.spans.length) {
-      list.innerHTML = '<div style="padding:16px;color:var(--text-muted)">No LLM calls observed yet.</div>';
-    } else {
-      list.innerHTML = '<div class="span-row span-header"><span>Span ID</span><span>Model</span><span>Provider</span><span>Tokens</span><span>Cost</span><span>Latency</span></div>' +
-        data.spans.map(s => `
-          <div class="span-row">
-            <span class="span-id">${s.span_id.slice(0,8)}</span>
-            <span>${esc(s.model)}</span>
-            <span>${esc(s.provider)}</span>
-            <span>${s.tokens_in}/${s.tokens_out}</span>
-            <span>$${(s.cost_usd || 0).toFixed(4)}</span>
-            <span>${Math.round(s.latency_ms)}ms</span>
-          </div>
-        `).join('');
-    }
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load traces: ' + e.message + '</p>'; }
+function renderAlignmentProgress(specs) {
+  const el = document.getElementById('alignment-progress');
+  const pct = specs.coverage_percent || 0;
+  const cls = pct >= 80 ? 'green' : pct >= 50 ? 'amber' : 'red';
+  el.innerHTML = `
+    <div style="font-size:24px;font-weight:700;margin-bottom:8px;font-family:var(--mono)">${pct}% <span style="font-size:13px;font-weight:400;color:var(--text-muted)">Requirements Implemented</span></div>
+    <div class="progress-bar"><div class="progress-fill ${cls}" style="width:${pct}%"></div></div>
+    <div style="display:flex;gap:16px;font-size:12px;color:var(--text-muted);margin-bottom:20px">
+      <span>${specs.total_specs} specs</span><span>${specs.total_requirements} requirements</span>
+    </div>
+  `;
 }
 
-// --- Provenance (Causal Graph) ---
-async function loadProvenance(el) {
-  el.innerHTML = '<div class="page-title">Provenance Graph</div><div class="cards" id="prov-cards"></div><div id="graph-container"></div>';
-  try {
-    const data = await fetch(API + '/api/provenance').then(r => r.json());
-    const cards = document.getElementById('prov-cards');
-    const edgeTypes = Object.entries(data.summary.edge_types || {}).map(([k,v]) => `${k}: ${v}`).join(', ') || 'None';
-    cards.innerHTML = `
-      <div class="card"><div class="card-label">Spans</div><div class="card-value">${data.summary.total_spans}</div></div>
-      <div class="card"><div class="card-label">Causal Edges</div><div class="card-value">${data.summary.total_edges}</div></div>
-      <div class="card"><div class="card-label">Edge Types</div><div class="card-value" style="font-size:12px">${edgeTypes}</div></div>
-    `;
-    if (data.graph.nodes.length) {
-      const elements = [];
-      const PROV_COLORS = { anthropic: '#6366f1', openai: '#22c55e', ollama: '#f59e0b' };
-      data.graph.nodes.forEach(n => {
-        elements.push({ data: { ...n.data, color: PROV_COLORS[n.data.provider] || '#8888a0' } });
-      });
-      const EDGE_COLORS = { taint: '#ef4444', taint_tracked: '#f59e0b', minhash: '#3b82f6', semantic: '#a855f7' };
-      data.graph.edges.forEach(e => {
-        elements.push({ data: { ...e.data, color: EDGE_COLORS[e.data.type] || '#2a2a3a' } });
-      });
-      cytoscape({
-        container: document.getElementById('graph-container'),
-        elements,
-        style: [
-          { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': '#e4e4ef', 'text-outline-color': '#0a0a0f', 'text-outline-width': 2, 'width': 30, 'height': 30 } },
-          { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 2, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.8 } },
-        ],
-        layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, idealEdgeLength: 150 }
-      });
-    } else {
-      document.getElementById('graph-container').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted)">No provenance data yet. Run an agent session to capture causal links.</div>';
-    }
-  } catch(e) { el.innerHTML += '<p style="color:var(--red)">Failed to load provenance: ' + e.message + '</p>'; }
-}
-
-// --- Command Palette (Cmd+K) ---
-const commands = [
-  { label: 'Go to Overview', action: () => { navTo('overview'); }, shortcut: '1' },
-  { label: 'Go to Signals', action: () => { navTo('signals'); }, shortcut: '2' },
-  { label: 'Go to Traces', action: () => { navTo('traces'); }, shortcut: '3' },
-  { label: 'Go to Provenance', action: () => { navTo('provenance'); }, shortcut: '4' },
-  { label: 'Go to Decision Graph', action: () => { navTo('graph'); }, shortcut: '5' },
-  { label: 'Go to Contradictions', action: () => { navTo('contradictions'); }, shortcut: '6' },
-  { label: 'Go to Audit Trail', action: () => { navTo('audit'); }, shortcut: '7' },
-  { label: 'Refresh Data', action: () => { loadPage(currentPage); closeCmdPalette(); }, shortcut: 'R' },
-];
-
-function navTo(page) {
-  document.querySelectorAll('.nav-item').forEach(i => {
-    i.classList.toggle('active', i.dataset.page === page);
+function renderAlignmentSpecs(specs) {
+  const el = document.getElementById('alignment-specs');
+  if (!specs.coverage_reports || !specs.coverage_reports.length) {
+    el.innerHTML = '<div style="padding:16px;color:var(--text-dim)">No specs uploaded. Add PRD files to .smm/specs/ as JSON.</div>';
+    return;
+  }
+  let rows = '';
+  specs.coverage_reports.forEach(report => {
+    (report.coverages || []).forEach(cov => {
+      rows += `<tr>
+        <td>${esc(cov.requirement.text)}</td>
+        <td>${esc(cov.requirement.section)}</td>
+        <td>${statusBadge(cov.status)}</td>
+        <td>${esc(cov.matched_decision_title || '-')}</td>
+        <td style="font-family:var(--mono)">${Math.round(cov.similarity_score*100)}%</td>
+      </tr>`;
+    });
   });
-  currentPage = page;
-  loadPage(page);
-  closeCmdPalette();
+  el.innerHTML = `<table><thead><tr><th>Requirement</th><th>Section</th><th>Status</th><th>Matched Decision</th><th>Score</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
+
+function renderAlignmentContracts(contracts) {
+  const el = document.getElementById('alignment-contracts');
+  if (!contracts.services.length) {
+    el.innerHTML = '<div class="card" style="color:var(--text-dim)">No API endpoints detected. Place Python files with route decorators in src/.</div>';
+    return;
+  }
+  const scoreCls = contracts.consistency_score >= 0.9 ? 'success' : contracts.consistency_score >= 0.7 ? 'warning' : 'critical';
+  let html = `<div class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">`;
+  contracts.services.forEach(s => {
+    const hasViolation = contracts.violations.some(v => v.service_a === s.service_name || v.service_b === s.service_name);
+    html += `<div class="fw-card ${hasViolation ? 'alert' : ''}">
+      <div class="fw-name">${esc(s.service_name)}</div>
+      <div class="fw-status">${s.endpoint_count} endpoints ${hasViolation ? severityBadge('critical') : statusBadge('active')}</div>
+    </div>`;
+  });
+  html += `</div>`;
+  if (contracts.violations.length) {
+    html += `<div class="section-title" style="margin-top:16px">Violations (${contracts.violation_count})</div><div class="table-wrap"><table><thead><tr><th>Type</th><th>Severity</th><th>Message</th></tr></thead><tbody>`;
+    contracts.violations.forEach(v => {
+      html += `<tr><td>${esc(v.violation_type)}</td><td>${severityBadge(v.severity)}</td><td>${esc(v.message)}</td></tr>`;
+    });
+    html += '</tbody></table></div>';
+  }
+  el.innerHTML = html;
+}
+
+function loadAlignmentAnalytics() {
+  alert('Architecture DNA fingerprinting and cross-project analytics are computationally intensive. Access via CLI: vt analytics');
+}
+
+/* ===================================================================
+   GOVERNANCE — Internal sidebar workspace
+   =================================================================== */
+async function loadGovernance(el) {
+  el.innerHTML = `<div class="workspace-with-sidebar">
+    <div class="internal-sidebar">
+      <div class="internal-nav active" data-gov="agents" onclick="switchGovTab(this,'agents')">Agents</div>
+      <div class="internal-nav" data-gov="assumptions" onclick="switchGovTab(this,'assumptions')">Assumptions</div>
+      <div class="internal-nav" data-gov="compliance" onclick="switchGovTab(this,'compliance')">Compliance</div>
+      <div class="internal-nav" data-gov="audit" onclick="switchGovTab(this,'audit')">Audit Trail</div>
+      <div class="internal-nav" data-gov="settings" onclick="switchGovTab(this,'settings')">Settings</div>
+    </div>
+    <div class="internal-content" id="gov-content"></div>
+  </div>`;
+  currentGovTab = 'agents';
+  loadGovAgents();
+}
+
+function switchGovTab(navEl, tab) {
+  navEl.parentElement.querySelectorAll('.internal-nav').forEach(n => n.classList.remove('active'));
+  navEl.classList.add('active');
+  currentGovTab = tab;
+  switch(tab) {
+    case 'agents': loadGovAgents(); break;
+    case 'assumptions': loadGovAssumptions(); break;
+    case 'compliance': loadGovCompliance(); break;
+    case 'audit': loadGovAudit(); break;
+    case 'settings': loadGovSettings(); break;
+  }
+}
+
+/* --- Governance: Agents --- */
+async function loadGovAgents() {
+  const el = document.getElementById('gov-content');
+  el.innerHTML = '<div class="page-title">Agents</div><div style="margin-bottom:16px"><button class="btn primary">Onboard Agent</button></div><div id="agent-grid" class="cards" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))"></div>';
+  try {
+    const data = await fetch(API + '/api/agents').then(r => r.json());
+    const grid = document.getElementById('agent-grid');
+    if (!data.agents || !data.agents.length) {
+      grid.innerHTML = '<div class="card" style="color:var(--text-dim)">No agents onboarded. Configure agents in governance.yaml.</div>';
+      return;
+    }
+    grid.innerHTML = data.agents.map(a => {
+      const driftScore = a.activity ? (a.activity.drift_score || 0) : 0;
+      const driftCls = driftScore >= 0.7 ? 'var(--red)' : driftScore >= 0.4 ? 'var(--amber)' : 'var(--green)';
+      const dims = a.allowed_dimensions || [];
+      const blocked = a.restricted_dimensions || [];
+      return `<div class="agent-card">
+        <div class="agent-name">${esc(a.display_name || a.name)}</div>
+        <div class="agent-role">${esc(a.role || a.type || 'agent')}</div>
+        <div class="drift-gauge"><div class="drift-fill" style="width:${driftScore*100}%;background:${driftCls}"></div></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Drift: ${driftScore.toFixed(2)}</div>
+        <div>${dims.map(d => '<span class="permission-chip allow">+ ' + d + '</span>').join('')}${blocked.map(d => '<span class="permission-chip block">- ' + d + '</span>').join('')}</div>
+        ${a.activity ? `<div style="font-size:11px;color:var(--text-dim);margin-top:8px">${a.activity.decisions_made || 0} decisions</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+/* --- Governance: Assumptions --- */
+async function loadGovAssumptions() {
+  const el = document.getElementById('gov-content');
+  el.innerHTML = `<div class="page-title">Domain Assumptions</div>
+    <div class="cards" id="gov-assumption-cards"></div>
+    <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <select class="filter-select" style="width:auto" id="ga-status" onchange="filterGovAssumptions()"><option value="">All Status</option><option value="proposed" selected>Proposed</option><option value="validated">Validated</option><option value="rejected">Rejected</option><option value="deferred">Deferred</option></select>
+      <select class="filter-select" style="width:auto" id="ga-category" onchange="filterGovAssumptions()"><option value="">All Categories</option><option value="data_scope">Data Scope</option><option value="temporal">Temporal</option><option value="access">Access</option><option value="completeness">Completeness</option><option value="configuration">Configuration</option><option value="framework">Framework</option></select>
+      <button class="btn" onclick="triggerAssumptionScan()">Scan Now</button>
+    </div>
+    <div id="gov-assumption-list"></div>`;
+  await filterGovAssumptions();
+}
+
+async function filterGovAssumptions() {
+  const status = document.getElementById('ga-status').value;
+  const category = document.getElementById('ga-category').value;
+  let url = API + '/api/assumptions?limit=200';
+  if (status) url += '&status=' + status;
+  if (category) url += '&category=' + category;
+  try {
+    const data = await fetch(url).then(r => r.json());
+    renderGovAssumptionCards(data.stats);
+    renderGovAssumptionList(data.assumptions);
+  } catch(e) { document.getElementById('gov-assumption-list').innerHTML = `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+function renderGovAssumptionCards(stats) {
+  const el = document.getElementById('gov-assumption-cards');
+  if (!stats) { el.innerHTML = ''; return; }
+  const bs = stats.by_status || {};
+  el.innerHTML = `
+    <div class="card"><div class="card-label">Proposed</div><div class="card-value ${bs.proposed ? 'amber' : 'green'}">${bs.proposed || 0}</div><div class="card-sub">needs answer</div></div>
+    <div class="card"><div class="card-label">Validated</div><div class="card-value green">${bs.validated || 0}</div></div>
+    <div class="card"><div class="card-label">Rejected</div><div class="card-value ${bs.rejected ? 'red' : 'green'}">${bs.rejected || 0}</div></div>
+    <div class="card"><div class="card-label">Deferred</div><div class="card-value">${bs.deferred || 0}</div></div>
+  `;
+}
+
+function renderGovAssumptionList(assumptions) {
+  const el = document.getElementById('gov-assumption-list');
+  if (!assumptions || !assumptions.length) { el.innerHTML = '<div class="card" style="color:var(--text-dim)">No assumptions match filters. Run <code>vt assumptions --scan</code>.</div>'; return; }
+  // Sort by severity: critical > high > medium > low
+  const sevOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  assumptions.sort((a, b) => (sevOrder[a.severity] || 3) - (sevOrder[b.severity] || 3));
+  el.innerHTML = assumptions.map(a => {
+    const evidence = a.code_evidence && a.code_evidence.length ? a.code_evidence[0] : null;
+    const options = (a.options || []).map((opt, i) => {
+      const sel = a.selected_option === i ? 'selected' : '';
+      return `<div class="option ${sel}" onclick="resolveAssumption('${a.id}', ${i})">${esc(opt)}</div>`;
+    }).join('');
+    return `<div class="assumption-card">
+      <div class="header">
+        ${statusBadge(a.status)} ${severityBadge(a.severity)}
+        <span style="font-size:11px;color:var(--text-dim)">${esc(a.category)} / ${esc(a.pattern_id)}</span>
+        <span style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-dim)">${Math.round((a.confidence||0)*100)}%</span>
+      </div>
+      <div style="font-weight:600;margin-bottom:6px">${esc(a.summary)}</div>
+      ${a.question ? `<div class="question-box"><div style="font-weight:600;margin-bottom:6px">${esc(a.question)}</div>${options}</div>` : ''}
+      ${evidence ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(evidence.file)}:${evidence.line}</div>` : ''}
+      ${evidence && evidence.snippet ? `<div class="evidence">${esc(evidence.snippet)}</div>` : ''}
+      ${a.detected_by ? `<div style="font-size:10px;color:var(--text-dim);margin-top:4px">detected by ${esc(a.detected_by)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function resolveAssumption(id, optionIdx) {
+  try {
+    await fetch(API + '/api/assumptions/' + id + '/resolve', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected_option: optionIdx, resolved_by: 'dashboard-user', rationale: '' })
+    });
+    filterGovAssumptions();
+  } catch(e) { console.error(e); }
+}
+
+async function triggerAssumptionScan() {
+  try {
+    await fetch(API + '/api/assumptions/scan', { method: 'POST' });
+    filterGovAssumptions();
+  } catch(e) { console.error(e); }
+}
+
+/* --- Governance: Compliance --- */
+async function loadGovCompliance() {
+  const el = document.getElementById('gov-content');
+  el.innerHTML = '<div class="page-title">Compliance</div><div id="compliance-frameworks" class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-bottom:24px"></div><div id="compliance-detail"></div><div style="text-align:right;margin-top:12px"><button class="btn primary" onclick="exportEvidence()">Export Evidence Bundle</button></div>';
+  try {
+    const data = await fetch(API + '/api/compliance').then(r => r.json());
+    const fw = document.getElementById('compliance-frameworks');
+    (data.compliance_mappings || []).forEach(m => {
+      const sCls = m.status === 'implemented' || m.status === 'partial' ? '' : 'alert';
+      fw.innerHTML += `<div class="fw-card ${sCls}"><div class="fw-name">${esc(m.framework)}</div><div class="fw-status">${statusBadge(m.status)}</div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(m.requirement)}</div></div>`;
+    });
+    const detail = document.getElementById('compliance-detail');
+    detail.innerHTML = `<div class="section-title">Attribution</div><div class="cards">
+      <div class="card"><div class="card-label">Agent Decisions</div><div class="card-value">${data.attribution.agent_decisions || 0}</div></div>
+      <div class="card"><div class="card-label">Human Decisions</div><div class="card-value">${data.attribution.human_decisions || 0}</div></div>
+      <div class="card"><div class="card-label">Total</div><div class="card-value">${data.attribution.total_decisions || 0}</div></div>
+    </div>`;
+  } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+async function exportEvidence() {
+  try {
+    const data = await fetch(API + '/api/compliance/export').then(r => r.json());
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `vt-evidence-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  } catch(e) { alert('Export failed: ' + e.message); }
+}
+
+/* --- Governance: Audit Trail --- */
+async function loadGovAudit() {
+  const el = document.getElementById('gov-content');
+  el.innerHTML = '<div class="page-title">Audit Trail</div><div style="margin-bottom:12px;display:flex;gap:8px"><input class="filter-input" style="max-width:300px" placeholder="Search events..." id="audit-search" oninput="filterAudit()"><button class="btn" onclick="verifyAudit()">Verify All</button></div><div class="table-wrap" id="audit-list"></div>';
+  try {
+    const data = await fetch(API + '/api/audit?limit=200').then(r => r.json());
+    window._auditData = data.entries || [];
+    renderAuditEntries(window._auditData);
+  } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+function filterAudit() {
+  const q = (document.getElementById('audit-search').value || '').toLowerCase();
+  const filtered = (window._auditData || []).filter(e => JSON.stringify(e).toLowerCase().includes(q));
+  renderAuditEntries(filtered);
+}
+
+async function verifyAudit() {
+  try {
+    const data = await fetch(API + '/api/audit?limit=200&verify=true').then(r => r.json());
+    window._auditData = data.entries || [];
+    renderAuditEntries(window._auditData);
+  } catch(e) { console.error(e); }
+}
+
+function renderAuditEntries(entries) {
+  const el = document.getElementById('audit-list');
+  if (!entries.length) { el.innerHTML = '<div style="padding:16px;color:var(--text-dim)">No audit entries.</div>'; return; }
+  el.innerHTML = entries.map(e => {
+    const typeBg = e.event_type.includes('contradiction') ? 'rgba(248,113,113,0.05)' : e.event_type.includes('decision') ? 'rgba(129,140,248,0.05)' : 'transparent';
+    return `<div class="audit-entry" style="background:${typeBg}">
+      <span class="audit-time">${fmtDate(e.timestamp)} ${fmtTime(e.timestamp)}</span>
+      <span class="audit-type">${esc(e.event_type)}</span>
+      <span style="min-width:100px">${esc(e.actor)}</span>
+      <span style="flex:1;font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(JSON.stringify(e.payload || {}).slice(0, 120))}</span>
+      ${e.verified === true ? '<span class="badge success">Verified</span>' : e.verified === false ? '<span class="badge critical">Failed</span>' : ''}
+    </div>`;
+  }).join('');
+}
+
+/* --- Governance: Settings --- */
+function loadGovSettings() {
+  const el = document.getElementById('gov-content');
+  el.innerHTML = `<div class="page-title">Settings</div>
+    <div class="card" style="max-width:500px;margin-bottom:16px">
+      <div class="section-title">Display</div>
+      <label class="density-toggle" style="margin-bottom:8px"><input type="checkbox" id="settings-density" onchange="document.body.classList.toggle('high-density',this.checked)"> High Density Mode (32px rows)</label>
+    </div>
+    <div class="card" style="max-width:500px;margin-bottom:16px">
+      <div class="section-title">Persona</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Controls default landing page and sidebar ordering.</div>
+      <select class="filter-select" style="width:auto" id="persona-select" onchange="setPersona(this.value)">
+        <option value="tech-lead">Tech Lead</option><option value="ciso">CISO</option><option value="pm">Product Manager</option><option value="qa">QA Engineer</option>
+      </select>
+    </div>
+    <div class="card" style="max-width:500px">
+      <div class="section-title">Advanced Configuration</div>
+      <details><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">Edit governance.yaml</summary>
+        <div style="margin-top:8px;color:var(--text-dim);font-size:12px">Edit governance.yaml directly in your project root or use <code>vt config</code> CLI command.</div>
+      </details>
+    </div>`;
+}
+
+function setPersona(persona) {
+  localStorage.setItem('vt-persona', persona);
+}
+
+/* ===================================================================
+   COMMAND PALETTE (Cmd+K)
+   =================================================================== */
+const cmdCommands = [
+  { prefix: '>', label: 'Go to Home', icon: '&#9632;', action: () => navTo('home') },
+  { prefix: '>', label: 'Go to Lattice', icon: '&#9670;', action: () => navTo('lattice') },
+  { prefix: '>', label: 'Go to Axiom', icon: '&#9830;', action: () => navTo('axiom') },
+  { prefix: '>', label: 'Go to Alignment', icon: '&#9733;', action: () => navTo('alignment') },
+  { prefix: '>', label: 'Go to Governance', icon: '&#9881;', action: () => navTo('governance') },
+  { prefix: '>', label: 'Resolve Contradictions', icon: '&#9888;', action: () => { navTo('axiom'); } },
+  { prefix: '>', label: 'Onboard Agent', icon: '&#9881;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="agents"]'),'agents'), 100); } },
+  { prefix: '>', label: 'Export SOC2 Evidence', icon: '&#9875;', action: () => exportEvidence() },
+  { prefix: '>', label: 'Toggle High Density', icon: '&#8596;', action: () => document.body.classList.toggle('high-density') },
+  { prefix: '>', label: 'Refresh Data', icon: '&#8635;', action: () => loadWorkspace(currentWorkspace) },
+  { prefix: '>', label: 'View Assumptions', icon: '&#10067;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="assumptions"]'),'assumptions'), 100); } },
+  { prefix: '>', label: 'View Audit Trail', icon: '&#9875;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="audit"]'),'audit'), 100); } },
+  { prefix: '>', label: 'View Compliance', icon: '&#9745;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="compliance"]'),'compliance'), 100); } },
+];
 
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); toggleCmdPalette(); }
@@ -515,54 +1028,124 @@ function toggleCmdPalette() {
   const overlay = document.getElementById('cmd-overlay');
   overlay.classList.toggle('open');
   if (overlay.classList.contains('open')) {
-    document.getElementById('cmd-input').value = '';
-    document.getElementById('cmd-input').focus();
-    filterCommands('');
+    const input = document.getElementById('cmd-input');
+    input.value = ''; input.focus();
+    filterCmdPalette('');
   }
 }
 function closeCmdPalette() { document.getElementById('cmd-overlay').classList.remove('open'); }
 
-document.getElementById('cmd-input').addEventListener('input', e => filterCommands(e.target.value));
+document.getElementById('cmd-input').addEventListener('input', e => filterCmdPalette(e.target.value));
 document.getElementById('cmd-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
-    const selected = document.querySelector('.cmd-item.selected') || document.querySelector('.cmd-item');
-    if (selected) selected.click();
+    const sel = document.querySelector('.cmd-item.selected') || document.querySelector('.cmd-item');
+    if (sel) sel.click();
+  }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const items = [...document.querySelectorAll('.cmd-item')];
+    const idx = items.findIndex(i => i.classList.contains('selected'));
+    items.forEach(i => i.classList.remove('selected'));
+    const next = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+    if (items[next]) { items[next].classList.add('selected'); items[next].scrollIntoView({ block: 'nearest' }); }
   }
 });
 document.getElementById('cmd-overlay').addEventListener('click', e => { if (e.target.id === 'cmd-overlay') closeCmdPalette(); });
 
-function filterCommands(query) {
-  const q = query.toLowerCase();
-  const filtered = commands.filter(c => c.label.toLowerCase().includes(q));
+function filterCmdPalette(query) {
+  const q = query.toLowerCase().trim();
   const results = document.getElementById('cmd-results');
-  results.innerHTML = filtered.map((c, i) => `
-    <div class="cmd-item${i === 0 ? ' selected' : ''}" onclick="(${c.action.toString()})()">
-      <span>${c.label}</span>
-      <span class="cmd-shortcut">${c.shortcut}</span>
+  let items = [];
+
+  if (q.startsWith('>') || !q.startsWith('@') && !q.startsWith('#') && !q.startsWith('?')) {
+    // Command mode
+    const search = q.startsWith('>') ? q.slice(1).trim() : q;
+    items = cmdCommands.filter(c => c.label.toLowerCase().includes(search));
+  } else if (q.startsWith('@')) {
+    // Agent targeting
+    const search = q.slice(1).trim();
+    items = [
+      { label: '@claude-backend', icon: '&#9881;', action: () => { closeCmdPalette(); navTo('lattice'); setTimeout(() => { const sel = document.getElementById('lf-agent'); if(sel) { sel.value='claude-backend'; applyLatticeFilters(); }}, 200); } },
+      { label: '@cursor-frontend', icon: '&#9881;', action: () => { closeCmdPalette(); navTo('lattice'); setTimeout(() => { const sel = document.getElementById('lf-agent'); if(sel) { sel.value='cursor-frontend'; applyLatticeFilters(); }}, 200); } },
+    ].filter(c => c.label.toLowerCase().includes(search));
+  } else if (q.startsWith('#')) {
+    // Search mode
+    items = [{ label: 'Search: ' + q.slice(1), icon: '&#128270;', action: () => { closeCmdPalette(); navTo('lattice'); setTimeout(() => { const inp = document.getElementById('lf-search'); if(inp) { inp.value = q.slice(1); applyLatticeFilters(); }}, 200); } }];
+  } else if (q.startsWith('?')) {
+    // Help mode
+    items = [
+      { label: 'Lyapunov drift measures agent trajectory divergence from expected behavior', icon: '?', action: () => closeCmdPalette() },
+      { label: 'NLI score is the Natural Language Inference confidence of a contradiction', icon: '?', action: () => closeCmdPalette() },
+      { label: 'Coherence = 1 - (actionable_contradictions / total_decisions)', icon: '?', action: () => closeCmdPalette() },
+    ].filter(c => c.label.toLowerCase().includes(q.slice(1).trim()));
+  }
+
+  if (!items.length) {
+    results.innerHTML = '<div style="padding:16px;color:var(--text-dim);text-align:center">No results</div>';
+    return;
+  }
+  results.innerHTML = items.map((c, i) => `
+    <div class="cmd-item${i === 0 ? ' selected' : ''}" onclick="(function(){${c.action.toString().slice(c.action.toString().indexOf('{') + 1, -1)}})();closeCmdPalette()">
+      <span class="cmd-label"><span class="cmd-icon">${c.icon || ''}</span> ${esc(c.label)}</span>
     </div>
   `).join('');
 }
 
-// --- WebSocket ---
+/* ===================================================================
+   WEBSOCKET
+   =================================================================== */
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws');
   ws.onmessage = e => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === 'contradiction_resolved' || msg.type === 'decision_added') {
-      loadPage(currentPage);
-    }
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === 'contradiction_resolved' || msg.type === 'decision_added') {
+        loadWorkspace(currentWorkspace);
+      }
+    } catch {}
   };
   ws.onclose = () => setTimeout(connectWS, 3000);
   ws.onerror = () => {};
 }
 
-// --- Helpers ---
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+/* ===================================================================
+   PERSONA-BASED ROUTING (on init)
+   =================================================================== */
+async function initDashboard() {
+  // Try to load persona config
+  let landing = 'home';
+  try {
+    const persona = localStorage.getItem('vt-persona');
+    if (persona) {
+      const routing = {
+        'tech-lead': 'home', 'ciso': 'governance', 'pm': 'alignment', 'qa': 'alignment'
+      };
+      landing = routing[persona] || 'home';
+    } else {
+      const data = await fetch(API + '/api/persona').then(r => r.json()).catch(() => null);
+      if (data && data.routing) {
+        landing = data.routing.landing || 'home';
+        localStorage.setItem('vt-persona', data.persona);
+      }
+    }
+  } catch {}
+  navTo(landing);
+  try { connectWS(); } catch {}
 
-// --- Init ---
-loadPage('overview');
-try { connectWS(); } catch(e) {}
+  // Update contradiction badge
+  try {
+    const data = await fetch(API + '/api/contradictions?status=unresolved').then(r => r.json());
+    if (data.total > 0) {
+      const axiomNav = document.querySelector('[data-page="axiom"]');
+      if (axiomNav && !axiomNav.querySelector('.badge')) {
+        axiomNav.innerHTML += ` <span class="badge" style="margin-left:auto;background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px">${data.total}</span>`;
+      }
+    }
+  } catch {}
+}
+
+initDashboard();
 </script>
 </body>
 </html>

@@ -99,3 +99,24 @@ class GraphPayload(BaseModel):
     spans: list[Span] = Field(default_factory=list)
     edges: list[CausalEdge] = Field(default_factory=list)
     summary: GraphSummary = Field(default_factory=GraphSummary)
+
+
+class ActivityEntry(BaseModel):
+    """A single entry in the unified activity timeline.
+
+    Common data model produced by all observers — MCP tool calls,
+    file reads/writes, shell commands, git operations, LLM calls.
+    """
+
+    entry_id: str = Field(description="16 hex chars")
+    timestamp: float = Field(description="Unix timestamp")
+    agent_id: str = ""
+    session_id: str = ""
+    action_type: str = Field(
+        description="llm_call | mcp_tool | file_read | file_write | shell_command | git_operation"
+    )
+    tool_name: str = ""
+    summary: str = ""
+    severity: str = Field(default="info", description="info | warning | critical")
+    details: dict[str, Any] = Field(default_factory=dict)
+    duration_ms: float = 0.0

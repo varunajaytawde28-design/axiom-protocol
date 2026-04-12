@@ -72,9 +72,9 @@ def sync_rules(
     agents_path.write_text(agents_content)
     result.files_written.append(agents_path)
 
-    # Also write to project root
+    # Write to project root — append governance section if AGENTS.md exists
     root_agents = project_root / "AGENTS.md"
-    root_agents.write_text(agents_content)
+    _write_root_agent_file(root_agents, agents_content)
     result.files_written.append(root_agents)
     logger.info("Generated AGENTS.md")
 
@@ -82,12 +82,33 @@ def sync_rules(
     has_claude = _is_agent_type_enabled(config, "claude")
     has_cursor = _is_agent_type_enabled(config, "cursor")
 
+    # Load validated/rejected assumptions for rule injection
+    try:
+        from vt_protocol.analysis.assumption_pipeline import load_assumptions
+        from vt_protocol.prevention.providers.claude import append_assumption_rules
+
+        all_assumptions = load_assumptions(project_root)
+        resolved_assumptions = [
+            a for a in all_assumptions
+            if a.status.value in ("validated", "rejected")
+        ]
+    except Exception:
+        resolved_assumptions = []
+
     # Claude provider — shared rules
     if has_claude:
         claude_content = generate_claude_md(scored, project_name=project_name)
+        # Inject domain assumption rules
+        if resolved_assumptions:
+            claude_content = append_assumption_rules(claude_content, resolved_assumptions)
         claude_path = generated_dir / "CLAUDE.md"
         claude_path.write_text(claude_content)
         result.files_written.append(claude_path)
+
+        # Write to project root — append governance section if CLAUDE.md exists
+        root_claude = project_root / "CLAUDE.md"
+        _write_root_claude_md(root_claude, claude_content)
+        result.files_written.append(root_claude)
 
         # .claude/rules/ files
         claude_rules_dir = project_root / ".claude" / "rules"
@@ -158,3 +179,50 @@ def _filter_scored_for_agent(
         if decision_dims & allowed:
             filtered.append(sd)
     return filtered
+
+
+_GOVERNANCE_START = "<!-- BEGIN VT PROTOCOL GOVERNANCE -->"
+_GOVERNANCE_END = "<!-- END VT PROTOCOL GOVERNANCE -->"
+
+
+def _write_root_claude_md(path: Path, governance_content: str) -> None:
+    """Write governance rules to root CLAUDE.md.
+
+    If the file already exists, replace the governance section (between markers)
+    or append it at the end. If it doesn't exist, write the full content.
+    """
+    wrapped = f"\n\n{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
+
+    if path.is_file():
+        existing = path.read_text()
+        if _GOVERNANCE_START in existing:
+            # Replace existing governance section
+            start = existing.index(_GOVERNANCE_START)
+            end = existing.index(_GOVERNANCE_END) + len(_GOVERNANCE_END)
+            updated = existing[:start].rstrip() + wrapped + existing[end:].lstrip("\n")
+            path.write_text(updated)
+        else:
+            # Append governance section
+            path.write_text(existing.rstrip() + wrapped)
+    else:
+        path.write_text(governance_content)
+
+
+def _write_root_agent_file(path: Path, governance_content: str) -> None:
+    """Write governance rules to root AGENTS.md.
+
+    Same append/replace logic as CLAUDE.md.
+    """
+    wrapped = f"\n\n{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
+
+    if path.is_file():
+        existing = path.read_text()
+        if _GOVERNANCE_START in existing:
+            start = existing.index(_GOVERNANCE_START)
+            end = existing.index(_GOVERNANCE_END) + len(_GOVERNANCE_END)
+            updated = existing[:start].rstrip() + wrapped + existing[end:].lstrip("\n")
+            path.write_text(updated)
+        else:
+            path.write_text(existing.rstrip() + wrapped)
+    else:
+        path.write_text(governance_content)

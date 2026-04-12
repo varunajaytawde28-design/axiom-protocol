@@ -18,6 +18,7 @@ def generate_claude_md(scored: list[ScoredDecision], project_name: str = "") -> 
     """Generate CLAUDE.md content from scored decisions.
 
     Only includes "always" tier decisions in the main CLAUDE.md.
+    Outputs imperative constraints, not descriptions.
     """
     always = [sd for sd in scored if sd.tier == "always"]
 
@@ -32,29 +33,40 @@ def generate_claude_md(scored: list[ScoredDecision], project_name: str = "") -> 
         lines.append("No architectural decisions recorded yet. Run `vt init` to scan your project.")
         return "\n".join(lines)
 
-    lines.append("## Architectural Decisions")
+    lines.append("## VT Protocol Governance Rules")
     lines.append("")
-    for sd in always:
+    lines.append("IMPORTANT: These rules are binding. Follow them when making changes.")
+    lines.append("")
+    for i, sd in enumerate(always, 1):
         d = sd.decision
-        dims = ", ".join(dim.value for dim in d.dimensions)
-        lines.append(f"### {d.title}")
-        lines.append("")
-        lines.append(f"**Dimensions:** {dims}")
-        lines.append(f"**Type:** {d.decision_type.value} | **Confidence:** {d.confidence:.0%}")
-        lines.append("")
-        # Compact imperative instruction
-        content = d.content.strip()
-        if len(content) > 300:
-            content = content[:297] + "..."
-        lines.append(content)
-        if d.rationale:
-            lines.append("")
-            lines.append(f"**Why:** {d.rationale}")
+        # Use constraint content if available; fall back to raw content
         if d.constraints:
-            lines.append("")
-            lines.append(f"**Constraints:** {', '.join(d.constraints)}")
-        lines.append("")
+            rule_text = d.constraints[0]
+        else:
+            rule_text = d.content.strip()
+            if len(rule_text) > 300:
+                rule_text = rule_text[:297] + "..."
+        lines.append(f"{i}. {rule_text}")
+    lines.append("")
 
+    return "\n".join(lines)
+
+
+def append_assumption_rules(content: str, assumptions: list) -> str:
+    """Append validated/rejected domain assumptions as rules to CLAUDE.md content."""
+    rules: list[str] = []
+    for a in assumptions:
+        rule = a.generate_rule_text()
+        if rule:
+            rules.append(rule)
+
+    if not rules:
+        return content
+
+    lines = [content.rstrip(), "", "## Domain Constraints (Human-Validated)", ""]
+    for r in rules:
+        lines.append(f"- {r}")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -76,9 +88,12 @@ def generate_claude_rules(scored: list[ScoredDecision], output_dir: Path) -> lis
         filepath = output_dir / filename
 
         globs_yaml = "\n".join(f'  - "{g}"' for g in sd.globs[:5])
-        content = d.content.strip()
-        if len(content) > 300:
-            content = content[:297] + "..."
+        if d.constraints:
+            content = d.constraints[0]
+        else:
+            content = d.content.strip()
+            if len(content) > 300:
+                content = content[:297] + "..."
 
         text = (
             f"---\n"

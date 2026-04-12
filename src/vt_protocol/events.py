@@ -28,6 +28,12 @@ class EventType(str, Enum):
     LLM_CALL_OBSERVED = "llm_call_observed"
     DECISION_RECORDED = "decision_recorded"
     CONTRADICTION_DETECTED = "contradiction_detected"
+    MCP_TOOL_CALLED = "mcp_tool_called"
+    SHELL_COMMAND_EXECUTED = "shell_command_executed"
+    GIT_OPERATION = "git_operation"
+    FILE_READ = "file_read"
+    ASSUMPTION_DETECTED = "assumption_detected"
+    ASSUMPTION_RESOLVED = "assumption_resolved"
 
 
 @dataclass

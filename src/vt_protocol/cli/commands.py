@@ -196,11 +196,139 @@ def check(path: str, exit_code: bool, json_out: bool) -> None:
                 click.echo(f"    Confidence: {c.confidence:.0%}")
                 click.echo("")
 
+        # Assumptions section
+        from vt_protocol.analysis.assumption_pipeline import load_assumptions
+
+        assumptions = load_assumptions(root)
+        pending = [a for a in assumptions if a.is_actionable]
+        if assumptions:
+            click.echo("## Domain Assumptions")
+            click.echo("")
+            click.echo(f"  {len(assumptions)} detected, {len(pending)} require resolution")
+            if pending:
+                click.echo("")
+                for a in pending[:5]:
+                    click.echo(f"  - [{a.severity.upper()}] {a.summary}")
+                if len(pending) > 5:
+                    click.echo(f"  ... and {len(pending) - 5} more")
+            click.echo("")
+
         status = "FAIL" if actionable else "PASS"
         click.echo(f"**Result: {status}**")
 
     if exit_code and actionable:
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# vt assumptions
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option("--path", type=click.Path(exists=True), default=".", help="Project root path")
+@click.option("--scan", is_flag=True, help="Run fresh assumption scan")
+@click.option("--resolve", is_flag=True, help="Interactive resolution mode")
+@click.option("--status", type=click.Choice(["detected", "proposed", "validated", "rejected", "deferred"]), default=None)
+@click.option("--json-output", "json_out", is_flag=True, help="Output as JSON")
+def assumptions(path: str, scan: bool, resolve: bool, status: str | None, json_out: bool) -> None:
+    """Manage domain assumptions detected in code.
+
+    Shows implicit assumptions that AI agents embedded in code,
+    generates clarifying questions, and routes to human review.
+    """
+    from vt_protocol.analysis.assumption_pipeline import (
+        load_assumptions,
+        resolve_assumption,
+        run_assumption_pipeline,
+        save_assumptions,
+    )
+    from vt_protocol.config import find_project_root
+
+    root = Path(path).resolve()
+    try:
+        root = find_project_root(root)
+    except FileNotFoundError:
+        click.echo("Error: not a VT Protocol project. Run 'vt init' first.")
+        sys.exit(1)
+
+    if scan:
+        click.echo("Scanning for domain assumptions...")
+        result = run_assumption_pipeline(root)
+        click.echo(f"  Detected: {result.detected}")
+        click.echo(f"  New:      {result.new}")
+        click.echo(f"  Deduped:  {result.deduped}")
+        click.echo(f"  Below threshold: {result.below_threshold}")
+        if result.assumptions:
+            save_assumptions(root, result.assumptions)
+            click.echo(f"\nSaved {len(result.assumptions)} assumptions to .smm/assumptions/")
+        return
+
+    all_assumptions = load_assumptions(root)
+    if status:
+        all_assumptions = [a for a in all_assumptions if a.status.value == status]
+
+    if resolve:
+        proposed = [a for a in all_assumptions if a.is_actionable and a.question]
+        if not proposed:
+            click.echo("No assumptions pending resolution.")
+            return
+
+        click.echo(f"\n{len(proposed)} assumptions need your input:\n")
+        for i, a in enumerate(proposed):
+            click.echo(f"--- Assumption {i + 1}/{len(proposed)} ---")
+            click.echo(f"[{a.severity.upper()}] {a.summary}")
+            if a.code_evidence:
+                ev = a.code_evidence[0]
+                click.echo(f"  File: {ev.file}:{ev.line}")
+                if ev.snippet:
+                    for line in ev.snippet.splitlines()[:5]:
+                        click.echo(f"    {line}")
+            click.echo(f"\n  {a.question}\n")
+            for j, opt in enumerate(a.options):
+                click.echo(f"    {j + 1}) {opt}")
+            click.echo(f"    0) Skip for now (defer)")
+            click.echo("")
+
+            choice = click.prompt("Your choice", type=int, default=0)
+            if choice == 0:
+                resolved = resolve_assumption(root, str(a.id), -1, resolved_by="cli-user")
+                click.echo("  → Deferred\n")
+            elif 1 <= choice <= len(a.options):
+                resolved = resolve_assumption(root, str(a.id), choice - 1, resolved_by="cli-user")
+                if resolved:
+                    click.echo(f"  → {resolved.status.value.upper()}\n")
+            else:
+                click.echo("  → Invalid choice, skipping\n")
+        return
+
+    if json_out:
+        items = [a.model_dump(mode="json") for a in all_assumptions]
+        click.echo(json.dumps({"total": len(items), "assumptions": items}, indent=2, default=str))
+        return
+
+    if not all_assumptions:
+        click.echo("No assumptions found. Run 'vt assumptions --scan' to detect assumptions in your codebase.")
+        return
+
+    click.echo(f"# Domain Assumptions ({len(all_assumptions)} total)\n")
+    by_status: dict[str, list] = {}
+    for a in all_assumptions:
+        by_status.setdefault(a.status.value, []).append(a)
+
+    for st in ["proposed", "detected", "validated", "rejected", "deferred"]:
+        group = by_status.get(st, [])
+        if not group:
+            continue
+        click.echo(f"## {st.upper()} ({len(group)})\n")
+        for a in group:
+            sev = a.severity.upper()
+            click.echo(f"  [{sev}] {a.summary}")
+            if a.code_evidence:
+                click.echo(f"         {a.code_evidence[0].file}:{a.code_evidence[0].line}")
+            if a.question and st == "proposed":
+                click.echo(f"         Q: {a.question}")
+        click.echo("")
 
 
 # ---------------------------------------------------------------------------
@@ -841,35 +969,41 @@ def _list_agents(cfg) -> None:
 
 
 def _write_initial_decisions(root: Path, matches: list) -> None:
-    """Write auto-detected dimensions as initial decision YAML files."""
+    """Write auto-detected dimensions as initial decision files.
+
+    Writes ONE decision per detected sub-dimension (not per core dimension).
+    Each decision includes imperative constraints — "use X, do not introduce Y".
+    """
     decisions_dir = root / ".smm" / "decisions"
     decisions_dir.mkdir(parents=True, exist_ok=True)
 
     from vt_protocol.decisions.models import Decision, DecisionType, Dimension, SourceType
+    from vt_protocol.decisions.taxonomy import generate_constraint
 
     written = 0
-    # Group by core dimension to avoid duplicate records
-    seen_dims: set[str] = set()
+    seen_sub: set[str] = set()
     for m in matches:
-        dim_key = m.core_dimension.value
-        if dim_key in seen_dims:
+        sub_id = m.sub_dimension.id
+        if sub_id in seen_sub:
             continue
-        seen_dims.add(dim_key)
+        seen_sub.add(sub_id)
 
         evidence_str = ", ".join(m.evidence[:5])
+        constraint_text = generate_constraint(m.sub_dimension, m.evidence)
+
         decision = Decision(
             title=f"Detected: {m.sub_dimension.label}",
-            content=f"Auto-detected from project scan. Evidence: {evidence_str}",
-            rationale="Scanned from existing project structure",
-            decision_type=DecisionType.TECHNICAL,
+            content=constraint_text,
+            rationale=f"Auto-detected from project scan. Evidence: {evidence_str}",
+            decision_type=DecisionType.CONSTRAINT,
             dimensions=[m.core_dimension],
+            constraints=[constraint_text],
             made_by="vt-init",
             project=root.name,
             source_type=SourceType.SCAN,
         )
 
-        # Write as JSON (simpler than YAML for structured data)
-        filename = f"{written + 1:03d}-{dim_key}.json"
+        filename = f"{written + 1:03d}-{sub_id.replace('.', '-')}.json"
         filepath = decisions_dir / filename
         if not filepath.exists():
             filepath.write_text(decision.model_dump_json(indent=2))

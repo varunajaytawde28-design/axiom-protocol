@@ -230,7 +230,7 @@ async def test_traces_with_spans(project_with_observation: Path) -> None:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 2
-        assert len(data["spans"]) == 2
+        assert len(data["entries"]) == 2
         assert data["summary"]["total_cost_usd"] > 0
         assert data["summary"]["total_tokens_in"] == 300
         assert data["summary"]["total_tokens_out"] == 150
@@ -248,17 +248,17 @@ async def test_traces_pagination(project_with_observation: Path) -> None:
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/traces?limit=1&offset=0")
         data = resp.json()
-        assert len(data["spans"]) == 1
+        assert len(data["entries"]) == 1
         assert data["total"] == 2
 
         resp2 = await client.get("/api/traces?limit=1&offset=1")
         data2 = resp2.json()
-        assert len(data2["spans"]) == 1
-        assert data2["spans"][0]["span_id"] != data["spans"][0]["span_id"]
+        assert len(data2["entries"]) == 1
+        assert data2["entries"][0]["entry_id"] != data["entries"][0]["entry_id"]
 
 
 @pytest.mark.asyncio
-async def test_traces_span_fields(project_with_observation: Path) -> None:
+async def test_traces_entry_fields(project_with_observation: Path) -> None:
     state = DashboardState(project_root=project_with_observation)
     state.load()
     set_state(state)
@@ -267,14 +267,14 @@ async def test_traces_span_fields(project_with_observation: Path) -> None:
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/traces")
         data = resp.json()
-        span = data["spans"][0]
-        # Check all expected fields are present
+        entry = data["entries"][0]
+        # Check unified timeline entry fields
         expected_fields = {
-            "span_id", "trace_id", "agent_id", "model", "provider",
-            "tokens_in", "tokens_out", "cost_usd", "latency_ms",
-            "status", "timestamp", "tainted_source",
+            "entry_id", "timestamp", "agent_id", "action_type",
+            "tool_name", "summary", "severity", "details", "duration_ms",
         }
-        assert expected_fields <= set(span.keys())
+        assert expected_fields <= set(entry.keys())
+        assert entry["action_type"] == "llm_call"
 
 
 @pytest.mark.asyncio
@@ -288,7 +288,7 @@ async def test_traces_empty(empty_project: Path) -> None:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 0
-        assert data["spans"] == []
+        assert data["entries"] == []
 
 
 # ---------------------------------------------------------------------------

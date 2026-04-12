@@ -69,10 +69,27 @@ class TestGenerateClaudeMd:
         content = generate_claude_md([], project_name="empty")
         assert "No architectural decisions" in content
 
-    def test_includes_dimensions(self, decisions: list[Decision]) -> None:
+    def test_includes_constraint_text(self, decisions: list[Decision]) -> None:
         scored = assign_tiers(decisions, always_count=5)
         content = generate_claude_md(scored)
-        assert "database" in content
+        # Non-constraint decisions fall back to d.content
+        assert "Decision about Use PostgreSQL" in content
+
+    def test_includes_constraint_when_present(self) -> None:
+        d = Decision(
+            title="Use SQLite",
+            content="Auto-detected",
+            rationale="Scanned",
+            constraints=["This project uses SQLite. Do not introduce PostgreSQL without approval."],
+            decision_type=DecisionType.CONSTRAINT,
+            dimensions=[Dimension.DATABASE],
+            made_by="vt-init",
+            project="test",
+            source_type=SourceType.SCAN,
+        )
+        scored = assign_tiers([d], always_count=1)
+        content = generate_claude_md(scored)
+        assert "Do not introduce PostgreSQL" in content
 
 
 class TestGenerateClaudeRules:

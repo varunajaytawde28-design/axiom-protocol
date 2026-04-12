@@ -496,6 +496,104 @@ def scan_to_core_dimensions(root: Path) -> list[Dimension]:
 
 
 # ---------------------------------------------------------------------------
+# Constraint generation — imperative rules from detected patterns
+# ---------------------------------------------------------------------------
+
+# Maps sub-dimension ID → (verb phrase, list of alternatives to forbid)
+_CONSTRAINT_ALTERNATIVES: dict[str, tuple[str, list[str]]] = {
+    "database.relational": ("Relational database", ["MongoDB", "DynamoDB", "Cassandra", "other NoSQL databases"]),
+    "database.nosql": ("NoSQL database", ["PostgreSQL", "MySQL", "relational databases"]),
+    "database.orm": ("ORM / data access layer", ["raw SQL strings", "alternative ORMs"]),
+    "database.migration": ("Schema migrations", ["manual DDL scripts", "ad-hoc ALTER TABLE"]),
+    "database.search": ("Search engine", ["alternative search engines"]),
+    "database.graph": ("Graph database", ["relational databases for graph queries"]),
+    "database.sqlite": ("SQLite database", ["PostgreSQL", "MongoDB", "any external database"]),
+    "api.rest": ("REST API framework", ["GraphQL", "gRPC", "alternative HTTP frameworks"]),
+    "api.graphql": ("GraphQL API", ["REST", "gRPC", "alternative API styles"]),
+    "api.grpc": ("gRPC services", ["REST", "GraphQL", "alternative RPC frameworks"]),
+    "api.websocket": ("WebSocket implementation", ["polling", "SSE", "alternative realtime transports"]),
+    "api.serialization": ("Data serialization", ["alternative validation/serialization libraries"]),
+    "api.versioning": ("API versioning", ["alternative versioning strategies"]),
+    "api.http_server": ("HTTP server (stdlib)", ["Flask", "FastAPI", "Django", "external web frameworks"]),
+    "infra.container": ("Container deployment", ["alternative containerization tools"]),
+    "infra.orchestration": ("Container orchestration", ["Docker Swarm", "Nomad", "alternative orchestrators"]),
+    "infra.ci_cd": ("CI/CD pipeline", ["alternative CI/CD platforms"]),
+    "infra.cloud": ("Cloud provider", ["alternative cloud providers"]),
+    "infra.cdn": ("CDN / static hosting", ["alternative CDN providers"]),
+    "infra.serverless": ("Serverless deployment", ["container-based deployment"]),
+    "infra.iac": ("Infrastructure as Code", ["manual infrastructure provisioning", "alternative IaC tools"]),
+    "comm.queue": ("Task queue", ["alternative task queue libraries"]),
+    "comm.pubsub": ("Pub/Sub messaging", ["alternative messaging systems"]),
+    "comm.events": ("Event sourcing", ["CRUD-based state management"]),
+    "comm.scheduling": ("Job scheduling", ["cron", "alternative schedulers"]),
+    "security.authn": ("Authentication", ["alternative auth libraries"]),
+    "security.authz": ("Authorization", ["alternative authorization frameworks"]),
+    "security.encryption": ("Encryption", ["alternative cryptography libraries"]),
+    "security.secrets": ("Secrets management", ["hardcoded secrets", "alternative secrets managers"]),
+    "security.cors": ("CORS handling", ["alternative CORS implementations"]),
+    "security.rate_limiting": ("Rate limiting", ["alternative rate limiting libraries"]),
+    "obs.logging": ("Structured logging", ["print statements", "alternative logging libraries"]),
+    "obs.monitoring": ("Monitoring", ["alternative monitoring platforms"]),
+    "obs.tracing": ("Distributed tracing", ["alternative tracing libraries"]),
+    "obs.metrics": ("Metrics collection", ["alternative metrics libraries"]),
+    "obs.alerting": ("Alerting", ["alternative alerting systems"]),
+    "quality.unit_testing": ("Unit testing", ["alternative test frameworks"]),
+    "quality.integration_testing": ("Integration testing", ["alternative integration test tools"]),
+    "quality.e2e_testing": ("End-to-end testing", ["alternative E2E frameworks"]),
+    "quality.error_handling": ("Error handling / retry", ["bare try/except", "alternative retry libraries"]),
+    "quality.validation": ("Input validation", ["manual validation", "alternative validation libraries"]),
+    "quality.linting": ("Linting & formatting", ["alternative linters"]),
+    "arch.state": ("State management", ["alternative state management libraries"]),
+    "arch.caching": ("Caching", ["alternative caching libraries"]),
+    "arch.concurrency": ("Concurrency model", ["threading", "multiprocessing", "alternative async frameworks"]),
+    "arch.threading": ("Threading / concurrency primitives", ["asyncio", "multiprocessing", "Celery", "alternative concurrency models"]),
+    "arch.di": ("Dependency injection", ["service locator", "alternative DI frameworks"]),
+    "arch.bundling": ("Build / bundling", ["alternative bundlers"]),
+    "arch.package_mgmt": ("Package management", ["alternative package managers"]),
+    "arch.monkey_patching": ("Monkey-patching / AOP", ["unittest.mock.patch for production instrumentation", "alternative AOP libraries"]),
+    "integration.llm": ("LLM provider integration", ["other LLM providers", "alternative LLM frameworks"]),
+    "data.similarity": ("Similarity detection", ["alternative similarity/ANN libraries"]),
+    "data.ml_embeddings": ("ML embeddings", ["alternative embedding/ML frameworks"]),
+}
+
+
+def _extract_detected_libs(evidence: list[str]) -> list[str]:
+    """Extract human-readable library names from evidence tags."""
+    libs: list[str] = []
+    for e in evidence:
+        if ":" in e:
+            lib = e.split(":", 1)[1]
+            # Convert underscores back to readable names
+            libs.append(lib.replace("_", ".") if "." not in lib else lib)
+    return libs
+
+
+def generate_constraint(sub: SubDimension, evidence: list[str]) -> str:
+    """Generate an imperative constraint from a detected sub-dimension.
+
+    Returns text like: "This project uses SQLite via stdlib sqlite3. Do not
+    introduce PostgreSQL, MongoDB, or any external database without approval."
+    """
+    detected_libs = _extract_detected_libs(evidence)
+    lib_str = " and ".join(detected_libs) if detected_libs else sub.label
+
+    alt_info = _CONSTRAINT_ALTERNATIVES.get(sub.id)
+    if alt_info:
+        category, alternatives = alt_info
+        alt_str = ", ".join(alternatives)
+        return (
+            f"This project uses {sub.label.lower()} via {lib_str}. "
+            f"Do not introduce {alt_str} without explicit approval."
+        )
+
+    # Fallback for unmapped sub-dimensions
+    return (
+        f"This project uses {sub.label.lower()} via {lib_str}. "
+        f"Do not introduce alternative implementations without explicit approval."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
 

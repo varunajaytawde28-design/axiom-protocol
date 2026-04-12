@@ -159,6 +159,27 @@ class ContradictionStatus(str, Enum):
     IGNORED = "ignored"
 
 
+class AssumptionCategory(str, Enum):
+    """6 domain assumption categories from SCA taxonomy."""
+
+    DATA_SCOPE = "data_scope"
+    TEMPORAL = "temporal"
+    ACCESS = "access"
+    COMPLETENESS = "completeness"
+    CONFIGURATION = "configuration"
+    FRAMEWORK = "framework"
+
+
+class AssumptionStatus(str, Enum):
+    """Lifecycle status of a domain assumption."""
+
+    DETECTED = "detected"
+    PROPOSED = "proposed"
+    VALIDATED = "validated"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+
+
 class AuditEventType(str, Enum):
     """Events recorded in the Merkle-tree audit log."""
 
@@ -169,6 +190,9 @@ class AuditEventType(str, Enum):
     CONTEXT_INJECTION = "context_injection"
     SESSION_STARTED = "session_started"
     SESSION_COMPLETED = "session_completed"
+    ASSUMPTION_DETECTED = "assumption_detected"
+    ASSUMPTION_VALIDATED = "assumption_validated"
+    ASSUMPTION_REJECTED = "assumption_rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +441,90 @@ class Session(BaseModel):
     decisions_made: list[UUID] = Field(default_factory=list)
     contradictions_found: list[UUID] = Field(default_factory=list)
     context_injections: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Domain Assumption Models
+# ---------------------------------------------------------------------------
+
+
+class CodeEvidence(BaseModel):
+    """A code location that evidences a domain assumption."""
+
+    file: str
+    line: int
+    snippet: str = ""
+
+
+class DomainAssumption(BaseModel):
+    """A detected implicit assumption in code that needs human validation.
+
+    From research: AI agents embed domain assumptions silently. These must
+    be surfaced as bounded multiple-choice questions (not yes/no — that
+    causes acquiescence bias) and routed through a lifecycle:
+    DETECTED → PROPOSED → VALIDATED | REJECTED | DEFERRED.
+
+    VALIDATED assumptions become immutable domain constraints.
+    REJECTED assumptions trigger refactor prompts (not hard contradictions).
+    DEFERRED assumptions re-surface after 7 days or on related code change.
+    """
+
+    id: UUID = Field(default_factory=uuid4)
+    category: AssumptionCategory
+    status: AssumptionStatus = AssumptionStatus.DETECTED
+    pattern_id: str = Field(description="Detection rule ID, e.g. 'single_source_write'")
+    summary: str = Field(description="Human-readable assumption statement")
+    code_evidence: list[CodeEvidence] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0, default=0.6)
+    severity: str = Field(default="medium", description="low | medium | high | critical")
+
+    # Question (populated by question generator)
+    question: str = ""
+    options: list[str] = Field(default_factory=list)
+    selected_option: int | None = Field(default=None, description="0-based index of chosen option")
+    answer_rationale: str = ""
+
+    # Resolution metadata
+    resolved_by: str = ""
+    business_context: str = ""
+    related_decision_id: UUID | None = None
+    dimensions: list[Dimension] = Field(default_factory=list)
+
+    # Timestamps
+    detected_at: datetime = Field(default_factory=_utcnow)
+    resolved_at: datetime | None = None
+    deferred_until: datetime | None = None
+
+    # Freeze-on-adopt
+    is_baseline: bool = Field(
+        default=False,
+        description="True if pre-existing at adoption — excluded from gates",
+    )
+
+    # Agent attribution
+    detected_by: str = Field(default="vt-scanner", description="Agent or tool that detected this")
+    session_id: str | None = None
+
+    @property
+    def dedup_key(self) -> str:
+        """Content-based key for deduplication across scans."""
+        first_file = self.code_evidence[0].file if self.code_evidence else ""
+        return f"{self.pattern_id}::{first_file}::{self.summary[:80]}"
+
+    @property
+    def is_actionable(self) -> bool:
+        """True if this assumption needs human attention."""
+        return self.status in (AssumptionStatus.DETECTED, AssumptionStatus.PROPOSED)
+
+    def generate_rule_text(self) -> str:
+        """Generate a CLAUDE.md rule from a resolved assumption."""
+        if self.status == AssumptionStatus.VALIDATED and self.options and self.selected_option is not None:
+            chosen = self.options[self.selected_option]
+            return f"DOMAIN RULE: {self.summary} — {chosen} [Validated by {self.resolved_by} on {self.resolved_at:%b %d}]"
+        if self.status == AssumptionStatus.REJECTED and self.options and self.selected_option is not None:
+            chosen = self.options[self.selected_option]
+            return f"DOMAIN RULE: DO NOT assume {self.summary.lower()}. {chosen} [Corrected by {self.resolved_by} on {self.resolved_at:%b %d}]"
+        return ""
 
 
 # ---------------------------------------------------------------------------

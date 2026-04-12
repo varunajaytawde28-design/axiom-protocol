@@ -16,6 +16,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,112 @@ def load_snapshot(path: Path) -> dict[str, FileEntry]:
         )
         for k, v in data.items()
     }
+
+
+# ---------------------------------------------------------------------------
+# File read tracking
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class FileReadRecord:
+    """A single file read event."""
+
+    file_path: str
+    timestamp: float  # Unix timestamp
+    agent_id: str = ""
+    session_id: str = ""
+
+
+class FileReadTracker:
+    """Tracks which files an agent reads during a session."""
+
+    def __init__(self) -> None:
+        self._reads: list[FileReadRecord] = []
+
+    @property
+    def reads(self) -> list[FileReadRecord]:
+        return list(self._reads)
+
+    @property
+    def read_count(self) -> int:
+        return len(self._reads)
+
+    @property
+    def unique_files(self) -> set[str]:
+        return {r.file_path for r in self._reads}
+
+    def record_read(
+        self,
+        file_path: str,
+        *,
+        agent_id: str = "",
+        session_id: str = "",
+    ) -> FileReadRecord:
+        """Record a file read event."""
+        import time
+
+        record = FileReadRecord(
+            file_path=file_path,
+            timestamp=time.time(),
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        self._reads.append(record)
+        return record
+
+    def summary_by_agent(self) -> dict[str, dict[str, int]]:
+        """Summarize reads per agent: {agent_id: {reads: N, unique_files: M}}."""
+        from collections import Counter
+
+        agent_reads: dict[str, list[str]] = {}
+        for r in self._reads:
+            key = r.agent_id or "unknown"
+            agent_reads.setdefault(key, []).append(r.file_path)
+
+        return {
+            agent: {
+                "reads": len(files),
+                "unique_files": len(set(files)),
+            }
+            for agent, files in agent_reads.items()
+        }
+
+    def to_activity_entries(self) -> list[dict[str, Any]]:
+        """Convert all reads to unified ActivityEntry dicts."""
+        import uuid as _uuid
+
+        entries = []
+        for r in self._reads:
+            entries.append({
+                "entry_id": _uuid.uuid4().hex[:16],
+                "timestamp": r.timestamp,
+                "agent_id": r.agent_id,
+                "session_id": r.session_id,
+                "action_type": "file_read",
+                "tool_name": "read_file",
+                "summary": f"Read: {r.file_path}",
+                "severity": "info",
+                "details": {"file_path": r.file_path},
+                "duration_ms": 0.0,
+            })
+        return entries
+
+    def save(self, path: Path) -> None:
+        """Persist read records to a JSON file."""
+        data = [asdict(r) for r in self._reads]
+        path.write_text(json.dumps(data, indent=2))
+
+    def load(self, path: Path) -> None:
+        """Load read records from a JSON file."""
+        if not path.exists():
+            return
+        data = json.loads(path.read_text())
+        self._reads = [FileReadRecord(**r) for r in data]
+
+    def reset(self) -> None:
+        """Clear all recorded reads."""
+        self._reads.clear()
 
 
 def _walk_files(root: Path, exclude: set[str]) -> list[Path]:
