@@ -9,26 +9,6 @@
 /* ===== DESIGN TOKENS ===== */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 :root {
-  /* Backgrounds */
-  --bg: #08080C;
-  --bg-card: #12121A;
-  --bg-surface: #1a1a26;
-  --border: #1F1F2E;
-  --border-focus: #3a3a50;
-  /* Semantic */
-  --red: #F87171;
-  --amber: #FBBF24;
-  --green: #34D399;
-  --indigo: #818CF8;
-  --indigo-dim: rgba(129,140,248,0.08);
-  /* Categorical (graphs only, NEVER for buttons/status) */
-  --cat-cyan: #22d3ee;
-  --cat-orange: #fb923c;
-  --cat-pink: #f472b6;
-  /* Text */
-  --text: #e4e4ef;
-  --text-muted: #8888a0;
-  --text-dim: #555568;
   /* Fonts */
   --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
@@ -39,13 +19,59 @@
   /* Density */
   --row-h: 48px;
 }
+/* Light theme (default) */
+body, body.light {
+  --bg: #ffffff;
+  --bg-card: #f8f9fa;
+  --bg-surface: #f0f1f3;
+  --border: #e2e4e8;
+  --border-focus: #c8ccd4;
+  --red: #dc2626;
+  --amber: #d97706;
+  --green: #059669;
+  --indigo: #4f46e5;
+  --indigo-dim: rgba(79,70,229,0.08);
+  --cat-cyan: #0891b2;
+  --cat-orange: #ea580c;
+  --cat-pink: #db2777;
+  --text: #1a1a2e;
+  --text-muted: #6b7280;
+  --text-dim: #9ca3af;
+  --link-hover: #3730a3;
+  --selection-bg: rgba(79,70,229,0.2);
+  --overlay-bg: rgba(0,0,0,0.3);
+  --shadow: rgba(0,0,0,0.08);
+}
+/* Dark theme */
+body.dark {
+  --bg: #08080C;
+  --bg-card: #12121A;
+  --bg-surface: #1a1a26;
+  --border: #1F1F2E;
+  --border-focus: #3a3a50;
+  --red: #F87171;
+  --amber: #FBBF24;
+  --green: #34D399;
+  --indigo: #818CF8;
+  --indigo-dim: rgba(129,140,248,0.08);
+  --cat-cyan: #22d3ee;
+  --cat-orange: #fb923c;
+  --cat-pink: #f472b6;
+  --text: #e4e4ef;
+  --text-muted: #8888a0;
+  --text-dim: #555568;
+  --link-hover: #a5b4fc;
+  --selection-bg: rgba(129,140,248,0.3);
+  --overlay-bg: rgba(0,0,0,0.6);
+  --shadow: rgba(0,0,0,0.3);
+}
 body.high-density { --row-h: 32px; --space-4: 10px; }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13px; line-height: 1.5; }
 a { color: var(--indigo); text-decoration: none; }
-a:hover { color: #a5b4fc; }
-::selection { background: rgba(129,140,248,0.3); }
+a:hover { color: var(--link-hover); }
+::selection { background: var(--selection-bg); }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -55,7 +81,7 @@ a:hover { color: #a5b4fc; }
 
 /* Primary sidebar — 5 workspaces */
 .sidebar { width: 200px; background: var(--bg-card); border-right: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; z-index: 10; }
-.sidebar-logo { padding: 16px; font-size: 14px; font-weight: 700; color: var(--indigo); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.sidebar-logo { padding: 16px; font-size: 14px; font-weight: 700; color: var(--indigo); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .sidebar-logo .sub { color: var(--text-muted); font-weight: 400; font-size: 11px; display: block; margin-top: 2px; }
 .sidebar-nav { flex: 1; padding: 8px 0; }
 .nav-item { padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 10px; border-left: 3px solid transparent; }
@@ -198,9 +224,9 @@ tr { height: var(--row-h); }
 .audit-type { font-weight: 600; min-width: 150px; }
 
 /* ===== COMMAND PALETTE ===== */
-.cmd-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 18vh; backdrop-filter: blur(2px); }
+.cmd-overlay { position: fixed; inset: 0; background: var(--overlay-bg); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 18vh; backdrop-filter: blur(2px); }
 .cmd-overlay.open { display: flex; }
-.cmd-box { width: 560px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.cmd-box { width: 560px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px var(--shadow); }
 .cmd-input { width: 100%; padding: 14px 16px; background: transparent; border: none; color: var(--text); font-size: 15px; font-family: var(--font); outline: none; border-bottom: 1px solid var(--border); }
 .cmd-input::placeholder { color: var(--text-dim); }
 .cmd-hint { padding: 6px 16px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
@@ -272,13 +298,18 @@ tr { height: var(--row-h); }
 /* ===== HIGH DENSITY TOGGLE ===== */
 .density-toggle { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); cursor: pointer; }
 .density-toggle input { accent-color: var(--indigo); }
+
+/* ===== THEME TOGGLE ===== */
+.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--text-muted); transition: all 0.15s; flex-shrink: 0; line-height: 1; padding: 0; }
+.theme-toggle:hover { border-color: var(--indigo); color: var(--indigo); }
 </style>
 </head>
-<body>
+<body class="light">
+<script>/* Apply saved theme before paint */(function(){var t=localStorage.getItem('vt-theme');if(t==='dark'||t==='light'){document.body.classList.remove('light','dark');document.body.classList.add(t);}})();</script>
 <div class="app">
   <!-- PRIMARY SIDEBAR — 5 workspaces -->
   <nav class="sidebar" id="primary-sidebar">
-    <div class="sidebar-logo">VT Protocol<span class="sub">Governance</span></div>
+    <div class="sidebar-logo"><span>VT Protocol<span class="sub">Governance</span></span><button class="theme-toggle" id="theme-toggle" title="Toggle theme" onclick="toggleTheme()">&#9788;</button></div>
     <div class="sidebar-nav" id="sidebar-nav">
       <div class="nav-item active" data-page="home"><span class="icon">&#9632;</span> <span>Home</span></div>
       <div class="nav-item" data-page="lattice"><span class="icon">&#9670;</span> <span>Lattice</span></div>
@@ -324,7 +355,7 @@ const ACTION_CLASSES = { llm_call:'llm', mcp_tool:'tool', shell_command:'shell',
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
 function fmtTime(ts) { if (!ts) return ''; try { return new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); } catch { return ''; } }
 function fmtDate(ts) { if (!ts) return ''; try { return new Date(ts).toLocaleDateString(); } catch { return ''; } }
-function dimTag(dim) { const c = DIM_COLORS[dim] || '#818CF8'; return `<span class="dim-tag" style="background:${c}22;color:${c}">${dim}</span>`; }
+function dimTag(dim) { const c = DIM_COLORS[dim] || getComputedStyle(document.body).getPropertyValue('--indigo').trim(); return `<span class="dim-tag" style="background:${c}22;color:${c}">${dim}</span>`; }
 function severityBadge(sev) {
   const map = { critical:'critical', high:'critical', warning:'warning', medium:'warning', low:'info', info:'info' };
   return `<span class="badge ${map[sev] || 'neutral'}">${sev}</span>`;
@@ -655,7 +686,7 @@ async function loadAxiomLedger() {
     const cy = cytoscape({
       container: document.getElementById('ledger-graph'), elements,
       style: [
-        { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': '#e4e4ef', 'text-outline-color': '#08080C', 'text-outline-width': 2, 'width': 28, 'height': 28, 'font-family': 'Inter, sans-serif' } },
+        { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': getComputedStyle(document.body).getPropertyValue('--text').trim(), 'text-outline-color': getComputedStyle(document.body).getPropertyValue('--bg').trim(), 'text-outline-width': 2, 'width': 28, 'height': 28, 'font-family': 'Inter, sans-serif' } },
         { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 1.5, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.7 } },
         { selector: 'edge[type="SHARED_DIMENSION"]', style: { 'target-arrow-shape': 'none', 'line-style': 'dotted', 'width': 1, 'opacity': 0.3 } }
       ],
@@ -979,6 +1010,7 @@ function loadGovSettings() {
   el.innerHTML = `<div class="page-title">Settings</div>
     <div class="card" style="max-width:500px;margin-bottom:16px">
       <div class="section-title">Display</div>
+      <label class="density-toggle" style="margin-bottom:8px"><input type="checkbox" id="settings-dark-mode" ${document.body.classList.contains('dark') ? 'checked' : ''} onchange="toggleTheme()"> Dark Mode</label>
       <label class="density-toggle" style="margin-bottom:8px"><input type="checkbox" id="settings-density" onchange="document.body.classList.toggle('high-density',this.checked)"> High Density Mode (32px rows)</label>
     </div>
     <div class="card" style="max-width:500px;margin-bottom:16px">
@@ -1012,6 +1044,7 @@ const cmdCommands = [
   { prefix: '>', label: 'Resolve Contradictions', icon: '&#9888;', action: () => { navTo('axiom'); } },
   { prefix: '>', label: 'Onboard Agent', icon: '&#9881;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="agents"]'),'agents'), 100); } },
   { prefix: '>', label: 'Export SOC2 Evidence', icon: '&#9875;', action: () => exportEvidence() },
+  { prefix: '>', label: 'Toggle Dark Mode', icon: '&#9789;', action: () => toggleTheme() },
   { prefix: '>', label: 'Toggle High Density', icon: '&#8596;', action: () => document.body.classList.toggle('high-density') },
   { prefix: '>', label: 'Refresh Data', icon: '&#8635;', action: () => loadWorkspace(currentWorkspace) },
   { prefix: '>', label: 'View Assumptions', icon: '&#10067;', action: () => { navTo('governance'); setTimeout(() => switchGovTab(document.querySelector('[data-gov="assumptions"]'),'assumptions'), 100); } },
@@ -1108,6 +1141,26 @@ function connectWS() {
   ws.onclose = () => setTimeout(connectWS, 3000);
   ws.onerror = () => {};
 }
+
+/* ===================================================================
+   THEME TOGGLE
+   =================================================================== */
+function toggleTheme() {
+  const isDark = document.body.classList.contains('dark');
+  const next = isDark ? 'light' : 'dark';
+  document.body.classList.remove('light', 'dark');
+  document.body.classList.add(next);
+  localStorage.setItem('vt-theme', next);
+  updateThemeIcon();
+}
+
+function updateThemeIcon() {
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  btn.innerHTML = document.body.classList.contains('dark') ? '\u263E' : '\u2600';
+  btn.title = document.body.classList.contains('dark') ? 'Switch to light mode' : 'Switch to dark mode';
+}
+updateThemeIcon();
 
 /* ===================================================================
    PERSONA-BASED ROUTING (on init)
