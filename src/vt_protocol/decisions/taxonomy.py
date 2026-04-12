@@ -330,6 +330,37 @@ TAXONOMY: tuple[SubDimension, ...] = (
                       "Pipfile", "poetry.lock", "pnpm-lock.yaml", "yarn.lock",
                       "Cargo.toml", "go.mod"),
     ),
+    # ── INTEGRATION facet (detected via imports + packages) ───────────
+    SubDimension(
+        "integration.llm", "LLM Provider Integration", Dimension.API_STYLE, "api",
+        python_packages=("anthropic", "openai", "cohere", "replicate", "litellm",
+                         "langchain", "llama-index", "google-generativeai", "together"),
+    ),
+    SubDimension(
+        "database.sqlite", "SQLite Database", Dimension.DATABASE, "data",
+        python_packages=("sqlite3", "aiosqlite"),
+    ),
+    SubDimension(
+        "api.http_server", "HTTP Server (stdlib)", Dimension.API_STYLE, "api",
+        python_packages=("http.server", "socketserver", "wsgiref"),
+    ),
+    SubDimension(
+        "arch.threading", "Threading / Concurrency Primitives", Dimension.CONCURRENCY, "architecture",
+        python_packages=("threading", "queue", "concurrent.futures", "multiprocessing"),
+    ),
+    SubDimension(
+        "arch.monkey_patching", "Monkey Patching / AOP", Dimension.STATE_MANAGEMENT, "architecture",
+        python_packages=("wrapt", "aspectlib", "monkeypatch"),
+    ),
+    SubDimension(
+        "data.similarity", "Similarity Detection", Dimension.DATABASE, "data",
+        python_packages=("datasketch", "faiss-cpu", "faiss", "annoy", "hnswlib"),
+    ),
+    SubDimension(
+        "data.ml_embeddings", "ML Embeddings", Dimension.DATABASE, "data",
+        python_packages=("sentence-transformers", "transformers", "torch",
+                         "tensorflow", "scikit-learn"),
+    ),
 )
 
 _DIMENSION_COUNT = len(TAXONOMY)  # 46 detailed dimensions across 7 facets
@@ -375,29 +406,42 @@ def scan_project(root: Path) -> list[DimensionMatch]:
     """Scan a project directory and return detected dimensions.
 
     Checks:
-    1. Python packages (requirements.txt, pyproject.toml [project].dependencies)
+    1. Python packages (requirements.txt, pyproject.toml [project].dependencies
+       AND [project.optional-dependencies])
     2. Node packages (package.json dependencies + devDependencies)
     3. File existence (Dockerfile, *.proto, etc.)
     4. Directory existence (migrations/, tests/, k8s/, etc.)
     5. Config files (.eslintrc, alembic.ini, etc.)
+    6. Python import statements in .py files (stdlib + third-party)
     """
     root = root.resolve()
     py_packages = _scan_python_packages(root)
     node_packages = _scan_node_packages(root)
     existing_files = _scan_files(root)
     existing_dirs = _scan_directories(root)
+    py_imports = _scan_python_imports(root)
 
     matches: list[DimensionMatch] = []
 
     for sd in TAXONOMY:
         evidence: list[str] = []
 
-        # Python packages
+        # Python packages (from requirements.txt / pyproject.toml)
         for pkg in sd.python_packages:
             normalized = pkg.replace("-", "_").lower()
             for found in py_packages:
                 if found.replace("-", "_").lower() == normalized:
                     evidence.append(f"python:{found}")
+
+        # Python imports (from .py file scanning)
+        for pkg in sd.python_packages:
+            normalized = pkg.replace("-", "_").lower()
+            for found in py_imports:
+                if found.replace("-", "_").lower() == normalized:
+                    # Avoid duplicate if already found via package files
+                    tag = f"import:{found}"
+                    if tag not in evidence and f"python:{found}" not in evidence:
+                        evidence.append(tag)
 
         # Node packages
         for pkg in sd.node_packages:
@@ -456,6 +500,14 @@ def scan_to_core_dimensions(root: Path) -> list[Dimension]:
 # ---------------------------------------------------------------------------
 
 
+def _extract_package_name(dep: str) -> str:
+    """Extract bare package name from a dependency string like 'wrapt>=1.16.0'."""
+    name = dep.split(">=")[0].split("<=")[0].split("==")[0].split("!=")[0]
+    name = name.split("<")[0].split(">")[0]
+    name = name.split("[")[0].split(";")[0].strip()
+    return name
+
+
 def _scan_python_packages(root: Path) -> set[str]:
     """Extract Python package names from requirements.txt and pyproject.toml."""
     packages: set[str] = set()
@@ -469,15 +521,13 @@ def _scan_python_packages(root: Path) -> set[str]:
                     line = line.strip()
                     if not line or line.startswith("#") or line.startswith("-"):
                         continue
-                    # Strip version specifiers and extras
-                    name = line.split(">=")[0].split("<=")[0].split("==")[0]
-                    name = name.split("[")[0].split(";")[0].strip()
+                    name = _extract_package_name(line)
                     if name:
                         packages.add(name)
             except OSError:
                 pass
 
-    # pyproject.toml [project].dependencies
+    # pyproject.toml [project].dependencies AND [project.optional-dependencies]
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         try:
@@ -487,11 +537,20 @@ def _scan_python_packages(root: Path) -> set[str]:
         try:
             with open(pyproject, "rb") as f:
                 data = tomllib.load(f)
-            for dep in data.get("project", {}).get("dependencies", []):
-                name = dep.split(">=")[0].split("<=")[0].split("==")[0]
-                name = name.split("[")[0].split(";")[0].strip()
+            project = data.get("project", {})
+
+            # [project.dependencies]
+            for dep in project.get("dependencies", []):
+                name = _extract_package_name(dep)
                 if name:
                     packages.add(name)
+
+            # [project.optional-dependencies] — all groups
+            for group_deps in project.get("optional-dependencies", {}).values():
+                for dep in group_deps:
+                    name = _extract_package_name(dep)
+                    if name:
+                        packages.add(name)
         except Exception:
             logger.debug("Failed to parse pyproject.toml", exc_info=True)
 
@@ -558,6 +617,59 @@ def _scan_directories(root: Path) -> set[str]:
     except OSError:
         pass
     return dirs
+
+
+def _scan_python_imports(root: Path) -> set[str]:
+    """Scan .py files for import statements using regex analyzer.
+
+    Returns a set of module names found in import statements (both top-level
+    and dotted paths like 'http.server').
+    """
+    import re
+
+    _IMPORT_RE = re.compile(
+        r"^(?:from\s+([\w.]+)\s+import|import\s+([\w., ]+))", re.MULTILINE
+    )
+
+    modules: set[str] = set()
+    skip_dirs = {
+        "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+        ".git", ".tox", ".mypy_cache", ".pytest_cache", ".eggs",
+        "site-packages",
+    }
+
+    try:
+        for py_file in root.rglob("*.py"):
+            # Skip non-source directories
+            parts = py_file.relative_to(root).parts
+            if any(p in skip_dirs for p in parts):
+                continue
+            try:
+                source = py_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            for m in _IMPORT_RE.finditer(source):
+                if m.group(1):  # from X import Y
+                    mod = m.group(1)
+                    if not mod.startswith("."):
+                        modules.add(mod)
+                        # Also add top-level for dotted imports
+                        top = mod.split(".")[0]
+                        if top:
+                            modules.add(top)
+                elif m.group(2):  # import X, Y
+                    for mod in m.group(2).split(","):
+                        mod = mod.strip().split(" as ")[0].strip()
+                        if mod and not mod.startswith("."):
+                            modules.add(mod)
+                            top = mod.split(".")[0]
+                            if top:
+                                modules.add(top)
+    except OSError:
+        pass
+
+    return modules
 
 
 def _matches_pattern(filename: str, pattern: str) -> bool:

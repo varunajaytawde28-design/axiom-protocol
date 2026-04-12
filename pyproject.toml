@@ -45,6 +45,9 @@ analyzers = [
     "tree-sitter-python>=0.23",
     "tree-sitter-typescript>=0.23",
 ]
+ml = [
+    "scikit-learn>=1.4.0",
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
@@ -75,6 +78,11 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: integration tests (may require external services)",
+    "adversarial: adversarial tests (edge cases, injection, breakage)",
+    "performance: performance benchmarks (may be slow)",
+    "chaos: chaos engineering tests (failure injection, corruption)",
+    "compliance: compliance and audit verification tests",
+    "slow: tests that take more than 5 seconds",
 ]
 
 [tool.mypy]

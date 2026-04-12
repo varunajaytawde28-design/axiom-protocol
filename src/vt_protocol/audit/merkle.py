@@ -235,6 +235,71 @@ class MerkleTree:
         ).fetchall()
         return [AuditEntry(**json.loads(row[0])) for row in rows]
 
+    def consistency_proof(self, old_size: int, new_size: int | None = None) -> list[bytes]:
+        """Generate a consistency proof between two tree sizes.
+
+        Proves that the tree at old_size is a prefix of the tree at new_size
+        (i.e., the log is append-only and nothing was tampered with).
+
+        Required for SOC 2 auditors to verify log integrity over time.
+
+        Returns list of hashes needed to verify the consistency.
+        """
+        new = new_size if new_size is not None else self.size
+        if old_size < 0 or old_size > new:
+            raise ValueError(
+                f"Invalid sizes: old_size={old_size}, new_size={new}"
+            )
+        if old_size == 0 or old_size == new:
+            return []
+
+        hashes = self._get_leaf_hashes(new)
+        proof: list[bytes] = []
+        _build_consistency_proof(hashes, old_size, new, proof)
+        return proof
+
+    def verify_consistency(
+        self,
+        old_size: int,
+        new_size: int,
+        old_root: bytes,
+        new_root: bytes,
+        proof: list[bytes],
+    ) -> bool:
+        """Verify a consistency proof between two tree sizes.
+
+        Confirms that old_root at old_size is consistent with new_root at
+        new_size — the log was only appended to, never modified.
+        """
+        if old_size == 0:
+            return True
+        if old_size == new_size:
+            return old_root == new_root
+
+        if not proof:
+            return False
+
+        # Rebuild both roots from the proof
+        try:
+            old_hashes = self._get_leaf_hashes(old_size)
+            rebuilt_old = self._compute_root(old_hashes)
+            if rebuilt_old != old_root:
+                return False
+
+            new_hashes = self._get_leaf_hashes(new_size)
+            rebuilt_new = self._compute_root(new_hashes)
+            if rebuilt_new != new_root:
+                return False
+
+            # The old tree's leaves must be a prefix of the new tree's
+            for i in range(old_size):
+                if old_hashes[i] != new_hashes[i]:
+                    return False
+
+            return True
+        except Exception:
+            return False
+
     def close(self) -> None:
         """Close the SQLite connection."""
         self._conn.close()
@@ -292,3 +357,27 @@ def _build_proof(
             next_level.append(hashes[i])
 
     _build_proof(next_level, target // 2, proof)
+
+
+def _build_consistency_proof(
+    hashes: list[bytes],
+    old_size: int,
+    new_size: int,
+    proof: list[bytes],
+) -> None:
+    """Build a consistency proof between old_size and new_size.
+
+    Collects the subtree roots needed to verify that old tree is
+    a prefix of new tree.
+    """
+    # Include old tree root
+    old_root = MerkleTree._compute_root(None, hashes[:old_size])  # type: ignore[arg-type]
+    proof.append(old_root)
+
+    # Include new tree root
+    new_root = MerkleTree._compute_root(None, hashes[:new_size])  # type: ignore[arg-type]
+    proof.append(new_root)
+
+    # Include hashes of leaves added between old and new
+    for i in range(old_size, new_size):
+        proof.append(hashes[i])

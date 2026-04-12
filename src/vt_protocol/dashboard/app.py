@@ -687,6 +687,156 @@ async def api_calibration() -> dict[str, Any]:
         store.close()
 
 
+@app.get("/api/compliance")
+async def api_compliance() -> dict[str, Any]:
+    """CISO compliance view — attribution, framework mapping, agent timeline.
+
+    Returns AI vs human attribution stats, compliance framework mappings,
+    and recent agent activity.
+    """
+    from vt_protocol.audit.compliance import (
+        compute_attribution,
+        extract_agent_activities,
+        generate_compliance_mappings,
+    )
+
+    state = get_state()
+
+    # Attribution stats
+    attribution = compute_attribution(state.decisions)
+
+    # Determine capabilities
+    has_merkle = state.merkle is not None and state.merkle.size > 0
+    audit_count = state.merkle.size if state.merkle else 0
+
+    # Check for signing key
+    signing_key_path = state.project_root / ".smm" / "signing_key"
+    has_signing = signing_key_path.exists()
+
+    # Check for RFC 3161 timestamps
+    timestamps_dir = state.project_root / ".smm" / "audit" / "timestamps"
+    has_rfc3161 = timestamps_dir.is_dir() and any(timestamps_dir.iterdir()) if timestamps_dir.is_dir() else False
+
+    mappings = generate_compliance_mappings(
+        has_merkle_audit=has_merkle,
+        has_signing=has_signing,
+        has_rfc3161=has_rfc3161,
+        has_agent_registry=False,  # Will be enabled in Sprint 13
+        has_attribution=len(state.decisions) > 0,
+        audit_entry_count=audit_count,
+    )
+
+    # Agent activity timeline
+    activities = []
+    if state.merkle:
+        entries = state.merkle.get_entries(limit=100)
+        agent_activities = extract_agent_activities(entries)
+        activities = [a.to_dict() for a in agent_activities]
+
+    return {
+        "attribution": attribution.to_dict(),
+        "compliance_mappings": [m.to_dict() for m in mappings],
+        "agent_activities": activities,
+    }
+
+
+@app.get("/api/compliance/export")
+async def api_compliance_export() -> dict[str, Any]:
+    """One-click evidence export — complete JSON bundle for auditors.
+
+    Includes audit entries, Merkle proofs, signatures, timestamps,
+    and verification instructions.
+    """
+    from vt_protocol.audit.compliance import build_evidence_bundle
+
+    state = get_state()
+
+    # Collect audit entries
+    audit_entries: list[AuditEntry] = []
+    tree_heads_data: list[dict[str, Any]] = []
+    inclusion_proofs_data: list[dict[str, Any]] = []
+    consistency_proofs_data: list[dict[str, Any]] = []
+
+    if state.merkle:
+        tree = state.merkle
+        audit_entries = tree.get_entries(limit=10000)
+
+        # Collect tree head and proofs
+        if tree.size > 0:
+            head = tree.get_tree_head()
+            tree_heads_data.append({
+                "tree_size": head.tree_size,
+                "root_hash_hex": head.root_hash.hex(),
+                "timestamp": head.timestamp.isoformat(),
+                "signature_hex": head.signature.hex() if head.signature else "",
+            })
+
+            # Inclusion proofs for last 10 entries
+            start = max(0, tree.size - 10)
+            raw_jsons = _get_raw_entry_jsons(tree, limit=10, offset=start)
+            for i, raw in enumerate(raw_jsons):
+                idx = start + i
+                try:
+                    proof = tree.inclusion_proof(idx)
+                    inclusion_proofs_data.append({
+                        "leaf_index": idx,
+                        "tree_size": proof.tree_size,
+                        "entry_json": raw,
+                        "root_hash_hex": tree.root_hash(proof.tree_size).hex(),
+                        "proof_hashes_hex": [h.hex() for h in proof.hashes],
+                    })
+                except Exception:
+                    pass
+
+    # Check capabilities
+    signing_key_path = state.project_root / ".smm" / "signing_key"
+    has_signing = signing_key_path.exists()
+    timestamps_dir = state.project_root / ".smm" / "audit" / "timestamps"
+    has_rfc3161 = timestamps_dir.is_dir() and any(timestamps_dir.iterdir()) if timestamps_dir.is_dir() else False
+
+    bundle = build_evidence_bundle(
+        state.decisions,
+        audit_entries,
+        tree_heads=tree_heads_data,
+        inclusion_proofs=inclusion_proofs_data,
+        consistency_proofs=consistency_proofs_data,
+        has_signing=has_signing,
+        has_rfc3161=has_rfc3161,
+    )
+
+    return bundle.to_dict()
+
+
+@app.get("/api/compliance/anchoring")
+async def api_compliance_anchoring() -> dict[str, Any]:
+    """RFC 3161 anchoring history — shows when tree heads were timestamped."""
+    from vt_protocol.audit.rfc3161 import AnchoringHistory, TimestampToken
+
+    state = get_state()
+    timestamps_dir = state.project_root / ".smm" / "audit" / "timestamps"
+
+    history = AnchoringHistory()
+    if timestamps_dir.is_dir():
+        import json as _json
+        for fp in sorted(timestamps_dir.glob("*.json")):
+            try:
+                data = _json.loads(fp.read_text())
+                token = TimestampToken(
+                    tree_size=data.get("tree_size", 0),
+                    root_hash_hex=data.get("root_hash_hex", ""),
+                    tsa_url=data.get("tsa_url", ""),
+                    response_status=data.get("response_status", ""),
+                    verified=data.get("verified", False),
+                )
+                if data.get("token_hex"):
+                    token.token_bytes = bytes.fromhex(data["token_hex"])
+                history.anchors.append(token)
+            except Exception:
+                logger.debug("Failed to load timestamp from %s", fp, exc_info=True)
+
+    return history.to_dict()
+
+
 @app.get("/api/sessions")
 async def api_sessions() -> dict[str, Any]:
     """Recent agent sessions with decisions captured."""
