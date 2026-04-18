@@ -277,3 +277,167 @@ async def test_assumptions_empty_project(tmp_path: Path) -> None:
     data = resp.json()
     assert data["total"] == 0
     assert data["assumptions"] == []
+
+
+# ---------------------------------------------------------------------------
+# Resolve endpoint — status transitions
+# ---------------------------------------------------------------------------
+
+
+def _project_with_one_assumption(
+    tmp_path: Path,
+    *,
+    status: AssumptionStatus = AssumptionStatus.PROPOSED,
+    options: list[str] | None = None,
+) -> tuple[Path, DomainAssumption]:
+    """Helper: project root + a single assumption file."""
+    (tmp_path / ".git").mkdir()
+    assumptions_dir = tmp_path / ".smm" / "assumptions"
+    assumptions_dir.mkdir(parents=True)
+    assumption = _make_assumption(
+        status=status,
+        options=options or [
+            "A) Correct — only place_order() writes",
+            "B) Incomplete — webhooks also write",
+            "C) Wrong — multiple services write",
+            "D) Need more context",
+        ],
+    )
+    _write_assumption_file(assumptions_dir, assumption)
+    return tmp_path, assumption
+
+
+@pytest.mark.asyncio
+async def test_resolve_option_0_sets_validated(tmp_path: Path) -> None:
+    """Option 0 (A) must set status=validated."""
+    root, assumption = _project_with_one_assumption(tmp_path)
+    state = DashboardState(project_root=root)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/api/assumptions/{assumption.id}/resolve",
+            json={"selected_option": 0, "resolved_by": "tech-lead", "rationale": "looks right"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "validated"
+    assert data["assumption"]["status"] == "validated"
+    assert data["assumption"]["selected_option"] == 0
+
+    # Reload from disk and verify persistence
+    reloaded = DomainAssumption.model_validate_json(
+        next((root / ".smm" / "assumptions").glob("*.json")).read_text()
+    )
+    assert reloaded.status.value == "validated"
+    assert reloaded.resolved_by == "tech-lead"
+
+
+@pytest.mark.asyncio
+async def test_resolve_option_1_sets_rejected(tmp_path: Path) -> None:
+    """Option 1 (B — not 'need more context') must set status=rejected."""
+    root, assumption = _project_with_one_assumption(tmp_path)
+    state = DashboardState(project_root=root)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/api/assumptions/{assumption.id}/resolve",
+            json={"selected_option": 1, "resolved_by": "tech-lead", "rationale": ""},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_resolve_context_option_sets_deferred(tmp_path: Path) -> None:
+    """An option whose text contains 'need more context' must set status=deferred."""
+    root, assumption = _project_with_one_assumption(
+        tmp_path,
+        options=[
+            "A) Correct",
+            "B) Wrong",
+            "C) I need more context before deciding",
+        ],
+    )
+    state = DashboardState(project_root=root)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/api/assumptions/{assumption.id}/resolve",
+            json={"selected_option": 2, "resolved_by": "pm", "rationale": ""},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "deferred"
+
+
+@pytest.mark.asyncio
+async def test_resolve_reloads_state_counts(tmp_path: Path) -> None:
+    """After resolving, GET /api/assumptions must show updated counts immediately."""
+    root, assumption = _project_with_one_assumption(tmp_path)
+    state = DashboardState(project_root=root)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Before: 1 proposed
+        before = await client.get("/api/assumptions")
+        assert before.json()["stats"]["by_status"].get("proposed", 0) == 1
+        assert before.json()["stats"]["by_status"].get("validated", 0) == 0
+
+        # Resolve → validated
+        await client.post(
+            f"/api/assumptions/{assumption.id}/resolve",
+            json={"selected_option": 0, "resolved_by": "human", "rationale": ""},
+        )
+
+        # After: 0 proposed, 1 validated — counts update in same request cycle
+        after = await client.get("/api/assumptions")
+        assert after.json()["stats"]["by_status"].get("proposed", 0) == 0
+        assert after.json()["stats"]["by_status"].get("validated", 0) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_404_unknown_id(tmp_path: Path) -> None:
+    """Resolving an unknown assumption ID must return 404."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".smm" / "assumptions").mkdir(parents=True)
+    state = DashboardState(project_root=tmp_path)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/assumptions/00000000-0000-0000-0000-000000000000/resolve",
+            json={"selected_option": 0, "resolved_by": "human", "rationale": ""},
+        )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resolve_invalid_option_returns_422(tmp_path: Path) -> None:
+    """An out-of-range option index must return 422."""
+    root, assumption = _project_with_one_assumption(tmp_path)
+    state = DashboardState(project_root=root)
+    state.load()
+    set_state(state)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            f"/api/assumptions/{assumption.id}/resolve",
+            json={"selected_option": 99, "resolved_by": "human", "rationale": ""},
+        )
+    assert resp.status_code == 422

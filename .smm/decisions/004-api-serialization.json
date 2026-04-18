@@ -1,0 +1,23 @@
+{
+  "id": "b83f05b3-8758-4881-ab75-7b99794adaaf",
+  "title": "Detected: Data Serialization",
+  "content": "This project uses data serialization via pydantic. Do not introduce alternative validation/serialization libraries without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:pydantic",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "api-style"
+  ],
+  "constraints": [
+    "This project uses data serialization via pydantic. Do not introduce alternative validation/serialization libraries without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948323Z",
+  "valid": true
+}

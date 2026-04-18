@@ -1,0 +1,23 @@
+{
+  "id": "fc2020bc-c77c-4071-9bd0-33ad37943bb9",
+  "title": "Detected: REST API",
+  "content": "This project uses rest api via fastapi. Do not introduce GraphQL, gRPC, alternative HTTP frameworks without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:fastapi",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "api-style"
+  ],
+  "constraints": [
+    "This project uses rest api via fastapi. Do not introduce GraphQL, gRPC, alternative HTTP frameworks without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948222Z",
+  "valid": true
+}

@@ -1,0 +1,8 @@
+---
+description: "Detected: Encryption"
+alwaysApply: true
+---
+
+# Detected: Encryption
+
+This project uses encryption via pynacl. Do not introduce alternative cryptography libraries without explicit approval.

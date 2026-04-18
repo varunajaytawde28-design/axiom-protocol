@@ -1,0 +1,8 @@
+---
+description: "Detected: Input Validation"
+alwaysApply: true
+---
+
+# Detected: Input Validation
+
+This project uses input validation via pydantic. Do not introduce manual validation, alternative validation libraries without explicit approval.

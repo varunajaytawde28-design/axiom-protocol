@@ -1,0 +1,23 @@
+{
+  "id": "61c44ec8-46c3-41a6-9016-277b5dc13ac2",
+  "title": "Detected: Unit Testing",
+  "content": "This project uses unit testing via pytest and unittest and tests. Do not introduce alternative test frameworks without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:pytest, import:unittest, dir:tests",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "testing"
+  ],
+  "constraints": [
+    "This project uses unit testing via pytest and unittest and tests. Do not introduce alternative test frameworks without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948612Z",
+  "valid": true
+}

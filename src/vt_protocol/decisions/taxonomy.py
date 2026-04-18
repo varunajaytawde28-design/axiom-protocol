@@ -606,6 +606,19 @@ def _extract_package_name(dep: str) -> str:
     return name
 
 
+def _extract_package_extras(dep: str) -> list[str]:
+    """Extract extras from a dependency string like 'celery[redis,amqp]>=5.3.0'.
+
+    Returns ['redis', 'amqp'] for that example, or [] if no extras.
+    """
+    import re
+
+    m = re.search(r"\[([^\]]+)\]", dep)
+    if not m:
+        return []
+    return [e.strip() for e in m.group(1).split(",") if e.strip()]
+
+
 def _scan_python_packages(root: Path) -> set[str]:
     """Extract Python package names from requirements.txt and pyproject.toml."""
     packages: set[str] = set()
@@ -622,6 +635,8 @@ def _scan_python_packages(root: Path) -> set[str]:
                     name = _extract_package_name(line)
                     if name:
                         packages.add(name)
+                    for extra in _extract_package_extras(line):
+                        packages.add(extra)
             except OSError:
                 pass
 
@@ -642,6 +657,8 @@ def _scan_python_packages(root: Path) -> set[str]:
                 name = _extract_package_name(dep)
                 if name:
                     packages.add(name)
+                for extra in _extract_package_extras(dep):
+                    packages.add(extra)
 
             # [project.optional-dependencies] — all groups
             for group_deps in project.get("optional-dependencies", {}).values():
@@ -649,6 +666,8 @@ def _scan_python_packages(root: Path) -> set[str]:
                     name = _extract_package_name(dep)
                     if name:
                         packages.add(name)
+                    for extra in _extract_package_extras(dep):
+                        packages.add(extra)
         except Exception:
             logger.debug("Failed to parse pyproject.toml", exc_info=True)
 

@@ -1,0 +1,23 @@
+{
+  "id": "87424be4-6b1d-4754-bcf1-be85b848e55e",
+  "title": "Detected: Package Management",
+  "content": "This project uses package management via pyproject.toml. Do not introduce alternative package managers without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: config:pyproject.toml",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "deployment"
+  ],
+  "constraints": [
+    "This project uses package management via pyproject.toml. Do not introduce alternative package managers without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948865Z",
+  "valid": true
+}

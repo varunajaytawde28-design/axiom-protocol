@@ -1,0 +1,22 @@
+{
+  "id": "24b16eed-75f0-4fa5-8f20-2b08db2376ce",
+  "decision_a_id": "66af4fd3-f601-45ff-9557-820cebfa06db",
+  "decision_b_id": "98971a46-4b5d-4c16-8c96-a65c9efdd40a",
+  "decision_a_title": "Detected: Concurrency",
+  "decision_b_title": "Detected: Threading / Concurrency Primitives",
+  "verdict": "contradiction",
+  "reasoning": "Heuristic: decisions advocate different technologies (asyncio vs threading) on shared dimension(s) concurrency.",
+  "evidence_a": "Technologies: asyncio",
+  "evidence_b": "Technologies: threading",
+  "shared_dimensions": [
+    "concurrency"
+  ],
+  "confidence": 0.6,
+  "status": "resolved",
+  "resolved_by": "cli-user",
+  "resolution_note": "Winner: 66af4fd3-f601-45ff-9557-820cebfa06db. Resolved via CLI",
+  "detected_at": "2026-04-14T06:51:13.651803Z",
+  "resolved_at": "2026-04-14T12:31:53.363937Z",
+  "is_baseline": false,
+  "pair_key": "66af4fd3-f601-45ff-9557-820cebfa06db::98971a46-4b5d-4c16-8c96-a65c9efdd40a"
+}

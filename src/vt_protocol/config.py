@@ -103,7 +103,7 @@ def ensure_smm_structure(root: Path) -> Path:
       .smm/audit/      — Merkle tree log (gitignored, synced to cloud)
     """
     smm = root / ".smm"
-    for subdir in ("decisions", "cache", "generated", "audit"):
+    for subdir in ("decisions", "cache", "generated", "audit", "traces", "contradictions", "pending-refactors"):
         (smm / subdir).mkdir(parents=True, exist_ok=True)
 
     # .smm/.gitignore — ignore transient state

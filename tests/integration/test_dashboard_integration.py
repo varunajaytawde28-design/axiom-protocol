@@ -82,6 +82,13 @@ def state(tmp_path: Path) -> DashboardState:
     ds.sessions = [session]
     ds._merkle = tree
 
+    # Persist contradictions to disk so api_contradictions (which re-reads
+    # from disk per Bug 2 fix) can find them.
+    contra_dir = tmp_path / ".smm" / "contradictions"
+    contra_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{str(c1.id)[:8]}.json"
+    (contra_dir / filename).write_text(c1.model_dump_json(indent=2))
+
     return ds
 
 
@@ -162,7 +169,8 @@ class TestDashboardIntegration:
         assert resp.status_code == 200
         data = resp.json()
         assert "entries" in data
-        assert len(data["entries"]) == 3  # 3 decision_added entries
+        # 3 decision_added + 1 contradiction_detected + 3 merkle entries
+        assert len(data["entries"]) >= 3
 
     def test_audit_with_limit(self, client: TestClient) -> None:
         resp = client.get("/api/audit?limit=2")

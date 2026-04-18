@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(get_project_context:*)",
+      "Bash(touch $LOCK:*)",
+      "Bash(python:*)",
+      "WebSearch",
+      "Bash(chmod +x:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "vt-protocol"
+  ],
+  "enableAllProjectMcpServers": true
+}

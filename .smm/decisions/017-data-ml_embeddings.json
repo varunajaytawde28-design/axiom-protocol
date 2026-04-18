@@ -1,0 +1,23 @@
+{
+  "id": "cb662176-7ee4-40c0-969b-0cba6e7e18ba",
+  "title": "Detected: ML Embeddings",
+  "content": "This project uses ml embeddings via sentence-transformers and scikit-learn. Do not introduce alternative embedding/ML frameworks without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:sentence-transformers, python:scikit-learn",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "database"
+  ],
+  "constraints": [
+    "This project uses ml embeddings via sentence-transformers and scikit-learn. Do not introduce alternative embedding/ML frameworks without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.949406Z",
+  "valid": true
+}

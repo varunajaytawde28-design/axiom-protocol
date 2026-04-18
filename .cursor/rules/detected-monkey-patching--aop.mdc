@@ -1,0 +1,8 @@
+---
+description: "Detected: Monkey Patching / AOP"
+alwaysApply: true
+---
+
+# Detected: Monkey Patching / AOP
+
+This project uses monkey patching / aop via wrapt. Do not introduce unittest.mock.patch for production instrumentation, alternative AOP libraries without explicit approval.

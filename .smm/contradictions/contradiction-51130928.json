@@ -1,0 +1,22 @@
+{
+  "id": "51130928-4000-4178-a62c-759ec29e22b7",
+  "decision_a_id": "6f0fa7c9-e5a5-42a7-af97-06122ca7f3b4",
+  "decision_b_id": "0aab513a-0193-4eb7-a2e8-59928fe978d0",
+  "decision_a_title": "Detected: ORM / Data Access",
+  "decision_b_title": "Detected: SQLite Database",
+  "verdict": "contradiction",
+  "reasoning": "Heuristic: decisions advocate different technologies (sqlalchemy vs sqlite) on shared dimension(s) database.",
+  "evidence_a": "Technologies: sqlalchemy",
+  "evidence_b": "Technologies: sqlite",
+  "shared_dimensions": [
+    "database"
+  ],
+  "confidence": 0.6,
+  "status": "resolved",
+  "resolved_by": "cli-user",
+  "resolution_note": "Winner: 6f0fa7c9-e5a5-42a7-af97-06122ca7f3b4. Resolved via CLI",
+  "detected_at": "2026-04-14T06:51:13.651548Z",
+  "resolved_at": "2026-04-14T12:31:52.222997Z",
+  "is_baseline": false,
+  "pair_key": "0aab513a-0193-4eb7-a2e8-59928fe978d0::6f0fa7c9-e5a5-42a7-af97-06122ca7f3b4"
+}

@@ -42,7 +42,9 @@ from vt_protocol.decisions.models import (
     ContradictionVerdict,
     Decision,
     DecisionStatus,
+    DecisionType,
     Dimension,
+    SourceType,
 )
 
 logger = logging.getLogger(__name__)
@@ -100,6 +102,8 @@ class DashboardState:
         self._file_reads: list[dict[str, Any]] = []
         # Domain assumptions
         self._assumptions: list[Any] = []
+        # Trace events from hooks and CLI
+        self._trace_events: list[dict[str, Any]] = []
 
     @property
     def merkle(self) -> MerkleTree | None:
@@ -116,6 +120,7 @@ class DashboardState:
         self.sessions = _load_sessions(self.project_root)
         self._load_observation()
         self._load_assumptions()
+        self._load_trace_events()
 
     def _load_assumptions(self) -> None:
         """Load domain assumptions from .smm/assumptions/."""
@@ -126,6 +131,39 @@ class DashboardState:
         except Exception:
             logger.debug("Failed to load assumptions", exc_info=True)
             self._assumptions = []
+
+    def _load_trace_events(self) -> None:
+        """Load trace events from .smm/traces/events.jsonl.
+
+        Also triggers a one-shot sync from Claude Code session logs
+        to pick up LLM call events.
+        """
+        # Sync from Claude Code session logs
+        try:
+            from vt_protocol.observation.session_logs import sync_session_to_traces
+            sync_session_to_traces(self.project_root)
+        except Exception:
+            logger.debug("Session log sync failed", exc_info=True)
+
+        events_path = self.project_root / ".smm" / "traces" / "events.jsonl"
+        if not events_path.exists():
+            self._trace_events = []
+            return
+        events: list[dict[str, Any]] = []
+        try:
+            for line in events_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        except Exception:
+            logger.debug("Failed to load trace events", exc_info=True)
+        # Sort newest first
+        events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+        self._trace_events = events
 
     def _load_observation(self) -> None:
         """Load observation data from .smm/cache and .smm/observation."""
@@ -359,6 +397,9 @@ async def api_decisions(
 ) -> dict[str, Any]:
     """List all decisions with optional filtering."""
     state = get_state()
+    # Re-read from disk on every request so new decisions appear immediately
+    # without requiring a dashboard restart (Bug 2 fix).
+    state.decisions = _load_decisions(state.project_root)
     filtered = state.decisions
 
     if dimension:
@@ -415,6 +456,9 @@ async def api_contradictions(
 ) -> dict[str, Any]:
     """List contradictions (defaults to unresolved)."""
     state = get_state()
+    # Re-read from disk on every request so new contradictions appear immediately
+    # without requiring a dashboard restart (Bug 2 fix).
+    state.contradictions = _load_contradictions(state.project_root)
     filtered = state.contradictions
 
     if status:
@@ -447,21 +491,124 @@ async def api_resolve_contradiction(
 
     for c in state.contradictions:
         if c.id == uid:
+            logger.info(
+                "Resolving contradiction %s: winner=%s, "
+                "decision_a=%s (%s), decision_b=%s (%s)",
+                uid, body.winner_id,
+                c.decision_a_id, c.decision_a_title,
+                c.decision_b_id, c.decision_b_title,
+            )
+
             c.status = ContradictionStatus.RESOLVED
             c.resolved_by = "dashboard-user"
             c.resolution_note = f"Winner: {body.winner_id}. {body.rationale}"
             c.resolved_at = datetime.now(timezone.utc)
 
+            # Determine loser and mark as superseded
+            winner_uuid = UUID(body.winner_id)
+            loser_id = (
+                c.decision_b_id if winner_uuid == c.decision_a_id
+                else c.decision_a_id
+            )
+            logger.info("Loser decision: %s", loser_id)
+
+            loser_decision = None
+            for d in state.decisions:
+                if d.id == loser_id:
+                    logger.info(
+                        "Found loser in state: '%s' (status=%s, valid=%s)",
+                        d.title, d.status, d.valid,
+                    )
+                    d.status = DecisionStatus.SUPERSEDED
+                    d.valid = False
+                    loser_decision = d
+                    logger.info(
+                        "After update: status=%s, valid=%s", d.status, d.valid,
+                    )
+                    break
+
+            if loser_decision is None:
+                logger.warning(
+                    "Could not find loser %s in state.decisions (%d decisions loaded)",
+                    loser_id, len(state.decisions),
+                )
+
             # Persist to disk
             _save_contradiction(state.project_root, c)
+            if loser_decision is not None:
+                _save_decision(state.project_root, loser_decision)
+
+            # Generate refactor task file (Bug 1 fix)
+            winner_title = (
+                c.decision_a_title if winner_uuid == c.decision_a_id
+                else c.decision_b_title
+            )
+            if loser_decision is not None:
+                try:
+                    from vt_protocol.decisions.resolution import generate_refactor_task
+                    generate_refactor_task(
+                        state.project_root,
+                        c,
+                        loser_id=str(loser_id),
+                        loser_title=loser_decision.title,
+                        winner_title=winner_title,
+                    )
+                except Exception:
+                    logger.debug("Failed to generate refactor task", exc_info=True)
+
+            # Log resolution to trace events
+            _log_resolution_trace_event(state.project_root, c, body.winner_id, winner_title)
+
+            # Auto-regenerate CLAUDE.md / .cursor/rules after resolution (Bug 4 fix)
+            _auto_apply_rules(state)
+
+            # Delete contradiction.lock so the agent can resume writing
+            _delete_contradiction_lock(state.project_root)
 
             # Broadcast to WebSocket clients
             await state.broadcast("contradiction_resolved", {
                 "id": str(uid),
                 "winner_id": body.winner_id,
+                "loser_id": str(loser_id),
+                "winner_title": winner_title,
+                "loser_title": loser_decision.title if loser_decision else "",
             })
 
-            return {"status": "resolved", "id": str(uid)}
+            return {
+                "status": "resolved",
+                "id": str(uid),
+                "loser_id": str(loser_id),
+                "loser_superseded": loser_decision is not None,
+            }
+
+    raise HTTPException(404, "Contradiction not found")
+
+
+@app.post("/api/contradictions/{contradiction_id}/defer")
+async def api_defer_contradiction(contradiction_id: str) -> dict[str, Any]:
+    """Defer a contradiction — unlock the agent and decide later."""
+    state = get_state()
+    try:
+        uid = UUID(contradiction_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    for c in state.contradictions:
+        if c.id == uid:
+            c.status = ContradictionStatus.DEFERRED
+            c.resolved_by = "dashboard-user"
+            c.resolution_note = "Deferred via dashboard"
+            # No resolved_at — contradiction remains open
+
+            _save_contradiction(state.project_root, c)
+            _delete_contradiction_lock(state.project_root)
+
+            await state.broadcast("contradiction_deferred", {
+                "id": str(uid),
+                "status": "deferred",
+            })
+
+            return {"status": "deferred", "id": str(uid)}
 
     raise HTTPException(404, "Contradiction not found")
 
@@ -470,6 +617,8 @@ async def api_resolve_contradiction(
 async def api_graph() -> dict[str, Any]:
     """Decision graph in Cytoscape.js format — nodes + edges."""
     state = get_state()
+    # Re-read from disk so new decisions appear without restart (Bug 2 fix).
+    state.decisions = _load_decisions(state.project_root)
     active = [d for d in state.decisions if d.valid]
 
     nodes = []
@@ -534,55 +683,402 @@ async def api_graph() -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
+def _audit_event_label(event_type: str) -> str:
+    """Human-readable label for an audit event_type value."""
+    return {
+        "decision_added": "Decision Created",
+        "decision_superseded": "Decision Superseded",
+        "contradiction_detected": "Contradiction Detected",
+        "contradiction_resolved": "Contradiction Resolved",
+        "context_injection": "vt check",
+        "session_started": "vt init",
+        "session_completed": "vt apply",
+        "assumption_detected": "Assumption Found",
+        "assumption_validated": "Assumption Validated",
+        "assumption_rejected": "Assumption Rejected",
+        "assumption_scan": "Assumptions Scanned",
+    }.get(event_type, event_type)
+
+
+def _audit_event_result(event_type: str) -> str:
+    """Result classification for an audit event."""
+    if event_type in ("contradiction_detected",):
+        return "warning"
+    if event_type in ("contradiction_resolved", "assumption_validated"):
+        return "pass"
+    if event_type in ("assumption_rejected",):
+        return "fail"
+    return "info"
+
+
+def _audit_entry_description(event_type: str, payload: dict[str, Any]) -> str:
+    """Build a short human description from event_type + payload."""
+    if event_type == "decision_added":
+        return payload.get("title", payload.get("decision_title", ""))
+    if event_type == "decision_superseded":
+        title = payload.get("title", "")
+        status = payload.get("status", "")
+        return f"{title} [{status}]" if title else status
+    if event_type == "contradiction_detected":
+        a = payload.get("decision_a_title", "")
+        b = payload.get("decision_b_title", "")
+        verdict = payload.get("verdict", "")
+        base = f"{a} ↔ {b}" if a and b else a or b
+        return f"{base} ({verdict})" if verdict else base
+    if event_type == "contradiction_resolved":
+        winner = payload.get("winner_title", payload.get("resolution_note", ""))
+        return f"Winner: {winner}" if winner else ""
+    if event_type == "context_injection":
+        count = payload.get("decision_count", len(payload.get("decisions_surfaced", [])))
+        query = payload.get("query", "")
+        return f"{count} decision(s) surfaced — {query[:80]}" if query else f"{count} decision(s) surfaced"
+    if event_type in ("session_started", "session_completed"):
+        commit = payload.get("commit_hash", "")
+        msg = payload.get("message", "")
+        return f"{msg[:80]} ({commit[:8]})" if commit else msg[:80]
+    if event_type in ("assumption_detected", "assumption_validated", "assumption_rejected"):
+        sev = payload.get("severity", "")
+        summary = payload.get("summary", payload.get("pattern_id", ""))
+        return f"[{sev.upper()}] {summary}" if sev and sev != "medium" else summary
+    if event_type == "assumption_scan":
+        count = payload.get("count", 0)
+        return f"{count} assumption(s) detected"
+    return json.dumps(payload)[:120] if payload else ""
+
+
+def _build_decision_entries(state: "DashboardState") -> list[dict[str, Any]]:
+    """Synthesize audit entries from loaded Decision objects.
+
+    Generates decision_added events from created_at and decision_superseded
+    events for decisions that have been superseded or marked invalid.
+    """
+    entries: list[dict[str, Any]] = []
+    for d in state.decisions:
+        actor = d.source_type.value if d.source_type else "cli"
+        ts = d.created_at.isoformat() if d.created_at else ""
+        entries.append({
+            "timestamp": ts,
+            "event_type": "decision_added",
+            "label": "Decision Created",
+            "description": d.title,
+            "actor": actor,
+            "result": "info",
+            "source": "decisions",
+            "payload": {
+                "title": d.title,
+                "source_type": actor,
+                "status": d.status.value,
+                "dimensions": [x.value if hasattr(x, "value") else str(x) for x in (d.dimensions or [])],
+            },
+            "verified": None,
+        })
+        if not d.valid or d.status.value in ("superseded", "deprecated", "archived"):
+            entries.append({
+                "timestamp": ts,
+                "event_type": "decision_superseded",
+                "label": "Decision Superseded",
+                "description": f"{d.title} [{d.status.value}]",
+                "actor": "system",
+                "result": "info",
+                "source": "decisions",
+                "payload": {"title": d.title, "status": d.status.value},
+                "verified": None,
+            })
+    return entries
+
+
+def _build_contradiction_entries(state: "DashboardState") -> list[dict[str, Any]]:
+    """Synthesize audit entries from loaded Contradiction objects."""
+    entries: list[dict[str, Any]] = []
+    for c in state.contradictions:
+        ts_detected = c.detected_at.isoformat() if c.detected_at else ""
+        entries.append({
+            "timestamp": ts_detected,
+            "event_type": "contradiction_detected",
+            "label": "Contradiction Detected",
+            "description": _audit_entry_description("contradiction_detected", {
+                "decision_a_title": c.decision_a_title,
+                "decision_b_title": c.decision_b_title,
+                "verdict": c.verdict.value if c.verdict else "",
+            }),
+            "actor": "system",
+            "result": "warning",
+            "source": "contradictions",
+            "payload": {
+                "decision_a_title": c.decision_a_title,
+                "decision_b_title": c.decision_b_title,
+                "verdict": c.verdict.value if c.verdict else "",
+                "status": c.status.value if c.status else "",
+            },
+            "verified": None,
+        })
+        if c.status and c.status.value == "resolved":
+            entries.append({
+                "timestamp": ts_detected,  # No separate resolved_at on model
+                "event_type": "contradiction_resolved",
+                "label": "Contradiction Resolved",
+                "description": f"Winner: {c.resolution_note or 'see rationale'}" if c.resolution_note else f"{c.decision_a_title} ↔ {c.decision_b_title}",
+                "actor": c.resolved_by or "dashboard",
+                "result": "pass",
+                "source": "contradictions",
+                "payload": {
+                    "decision_a_title": c.decision_a_title,
+                    "decision_b_title": c.decision_b_title,
+                    "resolved_by": c.resolved_by,
+                    "resolution_note": c.resolution_note,
+                },
+                "verified": None,
+            })
+    return entries
+
+
+def _build_assumption_entries(state: "DashboardState") -> list[dict[str, Any]]:
+    """Synthesize audit entries from loaded DomainAssumption objects.
+
+    Emits assumption_detected per assumption, plus assumption_validated /
+    assumption_rejected for resolved ones, and a single assumption_scan
+    summary entry dated to the earliest detected_at.
+    """
+    assumptions = getattr(state, "_assumptions", [])
+    if not assumptions:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    earliest_ts = None
+
+    for a in assumptions:
+        ts = a.detected_at.isoformat() if a.detected_at else ""
+        if ts and (earliest_ts is None or ts < earliest_ts):
+            earliest_ts = ts
+
+        sev = getattr(a, "severity", "medium") or "medium"
+        payload: dict[str, Any] = {
+            "pattern_id": a.pattern_id,
+            "summary": a.summary,
+            "severity": sev,
+            "category": a.category.value if a.category else "",
+            "status": a.status.value if a.status else "",
+        }
+
+        entries.append({
+            "timestamp": ts,
+            "event_type": "assumption_detected",
+            "label": "Assumption Found",
+            "description": f"[{sev.upper()}] {a.summary}",
+            "actor": getattr(a, "detected_by", "vt-scanner") or "vt-scanner",
+            "result": "warning" if sev in ("high", "critical") else "info",
+            "source": "assumptions",
+            "payload": payload,
+            "verified": None,
+        })
+
+        if a.status and a.status.value == "validated" and a.resolved_at:
+            entries.append({
+                "timestamp": a.resolved_at.isoformat(),
+                "event_type": "assumption_validated",
+                "label": "Assumption Validated",
+                "description": a.summary,
+                "actor": getattr(a, "resolved_by", "dashboard") or "dashboard",
+                "result": "pass",
+                "source": "assumptions",
+                "payload": payload,
+                "verified": None,
+            })
+        elif a.status and a.status.value == "rejected" and a.resolved_at:
+            entries.append({
+                "timestamp": a.resolved_at.isoformat(),
+                "event_type": "assumption_rejected",
+                "label": "Assumption Rejected",
+                "description": a.summary,
+                "actor": getattr(a, "resolved_by", "dashboard") or "dashboard",
+                "result": "fail",
+                "source": "assumptions",
+                "payload": payload,
+                "verified": None,
+            })
+
+    # One scan summary entry
+    if earliest_ts:
+        entries.append({
+            "timestamp": earliest_ts,
+            "event_type": "assumption_scan",
+            "label": "Assumptions Scanned",
+            "description": f"{len(assumptions)} assumption(s) detected",
+            "actor": "vt-scanner",
+            "result": "info",
+            "source": "assumptions",
+            "payload": {"count": len(assumptions)},
+            "verified": None,
+        })
+
+    return entries
+
+
+def _read_trace_events(project_root: Path) -> list[dict[str, Any]]:
+    """Read .smm/traces/events.jsonl and normalize to the unified audit schema.
+
+    Maps hook/llm_call events to the same shape as other audit entries so the
+    UI shows a single merged chronological table.
+    """
+    jsonl_path = project_root / ".smm" / "traces" / "events.jsonl"
+    entries: list[dict[str, Any]] = []
+    if not jsonl_path.exists():
+        return entries
+
+    try:
+        with jsonl_path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except Exception:
+                    continue
+
+                ev_type = raw.get("type", "unknown")
+                action = raw.get("action", "")
+                result = raw.get("result", "info")
+                agent = raw.get("agent", "cli")
+                ts = raw.get("timestamp", "")
+
+                if ev_type == "hook":
+                    event_type = f"hook_{action.lower()}" if action else "hook"
+                    label = f"Hook: {action}"
+                    file_ = raw.get("file", "")
+                    reason = raw.get("reason", "")
+                    description = file_.split("/")[-1] if file_ else ""
+                    if reason:
+                        description = f"{description} — {reason}"
+                    result_cls = "pass" if result == "pass" else "fail" if result in ("block", "blocked") else "info"
+                elif ev_type == "llm_call":
+                    event_type = "llm_call"
+                    label = "LLM Call"
+                    model = raw.get("model", "")
+                    tokens_in = raw.get("input_tokens", 0)
+                    tokens_out = raw.get("output_tokens", 0)
+                    preview = raw.get("prompt_preview", "")
+                    if preview:
+                        description = f"{model} — {preview[:80]}"
+                    elif model:
+                        description = f"{model} ({tokens_in}→{tokens_out} tok)"
+                    else:
+                        description = f"{tokens_in}→{tokens_out} tokens"
+                    result_cls = "info"
+                else:
+                    event_type = ev_type
+                    label = ev_type
+                    description = ""
+                    result_cls = "info"
+
+                entries.append({
+                    "timestamp": ts,
+                    "event_type": event_type,
+                    "label": label,
+                    "description": description,
+                    "actor": agent,
+                    "result": result_cls,
+                    "source": "traces",
+                    "payload": {k: v for k, v in raw.items() if k not in ("type", "agent", "timestamp")},
+                    "verified": None,
+                })
+    except Exception:
+        pass
+
+    return entries
+
+
 @app.get("/api/audit")
 async def api_audit(
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     verify: bool = Query(False, description="Verify Merkle inclusion proofs"),
 ) -> dict[str, Any]:
-    """Audit trail entries with optional Merkle proof verification."""
+    """Unified audit trail — merges all governance event sources.
+
+    Sources (in order of merge):
+    - state.decisions          → decision_added / decision_superseded
+    - state.contradictions     → contradiction_detected / contradiction_resolved
+    - state._assumptions       → assumption_detected / assumption_validated / assumption_rejected
+    - .smm/traces/events.jsonl → hook_edit, hook_write, llm_call
+    - .smm/audit/audit.db      → session_completed (Merkle-verified)
+
+    Schema per entry: timestamp, event_type, label, description, actor, result, source, payload, verified.
+    """
     state = get_state()
-    if not state.merkle:
-        return {"total": 0, "entries": [], "tree_size": 0}
 
-    tree = state.merkle
-    entries = tree.get_entries(limit=limit, offset=offset)
-    tree_size = tree.size
+    # --- 1. Decision lifecycle events ---
+    decision_entries = _build_decision_entries(state)
 
-    # For verification, fetch raw stored JSON to avoid re-serialization drift
-    raw_jsons: list[str] = []
-    if verify:
-        raw_jsons = _get_raw_entry_jsons(tree, limit=limit, offset=offset)
+    # --- 2. Contradiction events ---
+    contradiction_entries = _build_contradiction_entries(state)
 
-    result_entries = []
-    for i, entry in enumerate(entries):
-        idx = offset + i
-        entry_dict = {
-            "index": idx,
-            "entry_id": str(entry.entry_id),
-            "timestamp": entry.timestamp.isoformat(),
-            "event_type": entry.event_type.value,
-            "actor": entry.actor,
-            "project": entry.project,
-            "payload": entry.payload,
-            "verified": None,
-        }
+    # --- 3. Assumption events ---
+    assumption_entries = _build_assumption_entries(state)
 
-        if verify and idx < tree_size:
-            try:
-                proof = tree.inclusion_proof(idx, tree_size)
-                root = tree.root_hash(tree_size)
-                raw_data = raw_jsons[i].encode("utf-8") if i < len(raw_jsons) else b""
-                entry_dict["verified"] = tree.verify_inclusion(proof, raw_data, root)
-            except Exception:
-                entry_dict["verified"] = False
+    # --- 4. Trace events (hook + llm_call from events.jsonl) ---
+    trace_entries = _read_trace_events(state.project_root)
 
-        result_entries.append(entry_dict)
+    # --- 5. Merkle audit.db entries ---
+    merkle_entries: list[dict[str, Any]] = []
+    tree_size = 0
+    if state.merkle:
+        tree = state.merkle
+        tree_size = tree.size
+        db_entries = tree.get_entries(limit=1000, offset=0)
+
+        raw_jsons: list[str] = []
+        if verify:
+            raw_jsons = _get_raw_entry_jsons(tree, limit=1000, offset=0)
+
+        for i, entry in enumerate(db_entries):
+            ev = entry.event_type.value
+            payload = entry.payload or {}
+            entry_dict: dict[str, Any] = {
+                "timestamp": entry.timestamp.isoformat(),
+                "event_type": ev,
+                "label": _audit_event_label(ev),
+                "description": _audit_entry_description(ev, payload),
+                "actor": entry.actor,
+                "result": _audit_event_result(ev),
+                "source": "audit_db",
+                "payload": payload,
+                "verified": None,
+            }
+            if verify and i < tree_size:
+                try:
+                    proof = tree.inclusion_proof(i, tree_size)
+                    root = tree.root_hash(tree_size)
+                    raw_data = raw_jsons[i].encode("utf-8") if i < len(raw_jsons) else b""
+                    entry_dict["verified"] = tree.verify_inclusion(proof, raw_data, root)
+                except Exception:
+                    entry_dict["verified"] = False
+            merkle_entries.append(entry_dict)
+
+    # --- Merge all sources and sort chronologically (newest first) ---
+    all_entries = (
+        decision_entries
+        + contradiction_entries
+        + assumption_entries
+        + trace_entries
+        + merkle_entries
+    )
+    all_entries.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+
+    total = len(all_entries)
+    page = all_entries[offset: offset + limit]
 
     return {
-        "total": tree_size,
+        "total": total,
         "tree_size": tree_size,
-        "entries": result_entries,
+        "sources": {
+            "decisions": len(decision_entries),
+            "contradictions": len(contradiction_entries),
+            "assumptions": len(assumption_entries),
+            "traces": len(trace_entries),
+            "audit_db": len(merkle_entries),
+        },
+        "entries": page,
     }
 
 
@@ -810,6 +1306,43 @@ async def api_apply_resolution(
 
     # Persist changes
     _save_contradiction(state.project_root, target_c)
+
+    # Persist superseded decision to disk
+    superseded_id = result.get("superseded_id")
+    loser_d = None
+    winner_d = None
+    if superseded_id:
+        winner_id = result.get("winner_id", "")
+        for d in state.decisions:
+            if str(d.id) == superseded_id:
+                _save_decision(state.project_root, d)
+                loser_d = d
+            if str(d.id) == winner_id:
+                winner_d = d
+
+    # Generate refactor task file when a decision is superseded (Bug 1 fix)
+    if loser_d is not None and winner_d is not None and result.get("status") == "resolved":
+        try:
+            from vt_protocol.decisions.resolution import generate_refactor_task
+            generate_refactor_task(
+                state.project_root,
+                target_c,
+                loser_id=str(loser_d.id),
+                loser_title=loser_d.title,
+                winner_title=winner_d.title,
+            )
+        except Exception:
+            logger.debug("Failed to generate refactor task", exc_info=True)
+
+    # Log resolution to trace events
+    winner_title = winner_d.title if winner_d else ""
+    _log_resolution_trace_event(state.project_root, target_c, result.get("winner_id", ""), winner_title)
+
+    # Auto-regenerate CLAUDE.md / .cursor/rules after resolution (Bug 4 fix)
+    _auto_apply_rules(state)
+
+    # Delete contradiction.lock so the agent can resume writing
+    _delete_contradiction_lock(state.project_root)
 
     # Broadcast to WebSocket clients
     await state.broadcast("contradiction_resolved", {
@@ -1169,16 +1702,41 @@ async def api_signals() -> dict[str, Any]:
 async def api_traces(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    action_type: str | None = Query(None, description="Filter: llm_call, mcp_tool, file_read, shell_command, git_operation"),
+    action_type: str | None = Query(None, description="Filter: llm_call, mcp_tool, file_read, shell_command, git_operation, hook, cli, llm_call"),
     agent_id: str | None = Query(None, description="Filter by agent ID"),
     severity: str | None = Query(None, description="Filter: info, warning, critical"),
 ) -> dict[str, Any]:
-    """Unified activity timeline — merges LLM calls, MCP tools, file reads, shell commands, git ops.
+    """Unified activity timeline — merges LLM calls, MCP tools, file reads, shell commands, git ops, hook events, CLI events.
 
     Filterable by action_type, agent_id, and severity.
+    Also reads .smm/traces/events.jsonl for hook and CLI governance events.
     """
     state = get_state()
-    timeline = state._activity_timeline
+
+    # Re-read trace events from disk (they may have been appended since startup)
+    state._load_trace_events()
+
+    # Merge observation timeline with trace events
+    timeline = list(state._activity_timeline)
+    for te in state._trace_events:
+        severity_val = "warning" if te.get("result") == "block" else "info"
+        summary = f"{te.get('type', 'event')}: {te.get('action', '')} {te.get('file', '')}".strip()
+        if te.get("reason"):
+            summary += f" — {te['reason']}"
+        timeline.append({
+            "entry_id": f"trace-{te.get('timestamp', '')}-{te.get('action', '')}",
+            "timestamp": te.get("timestamp", ""),
+            "agent_id": te.get("agent", ""),
+            "session_id": "",
+            "action_type": te.get("type", "hook"),
+            "tool_name": te.get("action", ""),
+            "summary": summary,
+            "severity": severity_val,
+            "details": te,
+            "duration_ms": 0,
+        })
+    # Sort by timestamp descending
+    timeline.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
 
     # Apply filters
     if action_type:
@@ -1191,8 +1749,8 @@ async def api_traces(
     total = len(timeline)
     page = timeline[offset : offset + limit]
 
-    # Compute summary from full (unfiltered) timeline
-    full = state._activity_timeline
+    # Compute summary from full (unfiltered, merged) timeline
+    full = timeline
     action_counts: dict[str, int] = {}
     severity_counts: dict[str, int] = {}
     agents_seen: set[str] = set()
@@ -1205,10 +1763,23 @@ async def api_traces(
         if aid:
             agents_seen.add(aid)
 
-    # LLM-specific summary
+    # LLM-specific summary — aggregate from observation spans
     total_cost = sum(s.cost_usd or 0 for s in state._spans)
     total_tokens_in = sum(s.tokens_in for s in state._spans)
     total_tokens_out = sum(s.tokens_out for s in state._spans)
+    # Also aggregate from trace events (llm_call type) written by session_logs sync
+    # These carry the real token data from Claude Code JSONL files (Bug 5 fix).
+    for te in state._trace_events:
+        if te.get("type") == "llm_call":
+            ti = int(te.get("input_tokens") or 0)
+            to_ = int(te.get("output_tokens") or 0)
+            total_tokens_in += ti
+            total_tokens_out += to_
+            # Use pre-computed cost_usd if present, else estimate
+            if te.get("cost_usd"):
+                total_cost += float(te["cost_usd"])
+            else:
+                total_cost += _estimate_llm_cost(te.get("model", ""), ti, to_)
 
     return {
         "total": total,
@@ -1412,27 +1983,73 @@ async def api_assumption_detail(assumption_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Assumption not found")
 
 
+class _ResolveBody(BaseModel):
+    selected_option: int
+    resolved_by: str = "dashboard-user"
+    rationale: str = ""
+
+
 @app.post("/api/assumptions/{assumption_id}/resolve")
-async def api_resolve_assumption(assumption_id: str) -> dict[str, Any]:
+async def api_resolve_assumption(
+    assumption_id: str, body: _ResolveBody
+) -> dict[str, Any]:
     """Resolve a domain assumption via dashboard.
 
-    Body: {"selected_option": 0, "resolved_by": "techlead", "rationale": "..."}
+    Mapping (mirrors resolve_assumption in assumption_pipeline.py):
+      option 0  → VALIDATED  (A — current code is correct)
+      option with "need more context" text → DEFERRED  (E)
+      any other option → REJECTED  (B / C / D)
+
+    After resolving, reloads state._assumptions so counts update immediately.
     """
     from vt_protocol.analysis.assumption_pipeline import resolve_assumption
 
-    import starlette.requests
-
     state = get_state()
-    # Get request body manually since we don't want to import pydantic request model here
-    request = starlette.requests.Request(scope={"type": "http"})
 
-    # Use a simpler approach - read from any matching assumption
+    # Confirm the assumption exists in-memory first
+    target = None
     for a in state._assumptions:
-        if str(a.id) == assumption_id or a.id.hex[:8] == assumption_id:
-            # This endpoint will be called with JSON body in practice
-            # For now, return the assumption as-is to validate the route exists
-            return {"assumption": _serialize_assumption(a), "status": "found"}
-    raise HTTPException(status_code=404, detail="Assumption not found")
+        if str(a.id) == assumption_id or a.id.hex == assumption_id or a.id.hex[:8] == assumption_id:
+            target = a
+            break
+    if target is None:
+        raise HTTPException(status_code=404, detail="Assumption not found")
+
+    updated = resolve_assumption(
+        state.project_root,
+        str(target.id),
+        body.selected_option,
+        resolved_by=body.resolved_by,
+        rationale=body.rationale,
+    )
+    if updated is None:
+        raise HTTPException(status_code=422, detail="Could not resolve assumption (invalid option or already resolved)")
+
+    # If validated, create a decision from the assumption so it becomes a CLAUDE.md rule
+    decision_created = False
+    if updated.status.value == "validated":
+        try:
+            decision_created = _create_decision_from_assumption(state, updated)
+        except Exception:
+            logger.debug("Failed to create decision from validated assumption", exc_info=True)
+
+    # Log trace event for assumption resolution
+    _log_assumption_trace_event(state.project_root, updated)
+
+    # Auto-regenerate CLAUDE.md to include new assumption rules
+    _auto_apply_rules(state)
+
+    # Broadcast to WebSocket clients
+    await state.broadcast("assumption_resolved", {
+        "id": str(updated.id),
+        "status": updated.status.value,
+        "decision_created": decision_created,
+    })
+
+    # Reload so the next /api/assumptions call reflects the new status
+    state._load_assumptions()
+
+    return {"assumption": _serialize_assumption(updated), "status": updated.status.value, "decision_created": decision_created}
 
 
 @app.post("/api/assumptions/scan")
@@ -1506,6 +2123,8 @@ def _serialize_assumption(a: Any) -> dict[str, Any]:
 async def get_home() -> dict[str, Any]:
     """Aggregated home dashboard data for the triage view."""
     state = get_state()
+    # Re-read contradictions from disk so first load is never stale (Bug 2 fix).
+    state.contradictions = _load_contradictions(state.project_root)
     # Health data (reuse health logic)
     active = [d for d in state.decisions if d.status.value == "active"]
     actionable = [c for c in state.contradictions if c.is_actionable]
@@ -1709,6 +2328,61 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             state._ws_clients.remove(websocket)
 
 
+# Background task: watch events.jsonl for new entries and push via WebSocket
+_events_watch_task: asyncio.Task | None = None
+_last_events_size: int = 0
+
+
+async def _watch_events_jsonl() -> None:
+    """Poll events.jsonl for new entries and broadcast via WebSocket."""
+    global _last_events_size
+    state = get_state()
+    events_path = state.project_root / ".smm" / "traces" / "events.jsonl"
+
+    while True:
+        await asyncio.sleep(2)
+        try:
+            if not events_path.exists():
+                continue
+            current_size = events_path.stat().st_size
+            if current_size <= _last_events_size:
+                continue
+
+            # Read new lines
+            content = events_path.read_text()
+            lines = content.splitlines()
+            # Count lines we've already seen (approximate by size)
+            new_lines = []
+            seen_size = 0
+            for line in lines:
+                seen_size += len(line.encode("utf-8")) + 1  # +1 for newline
+                if seen_size > _last_events_size:
+                    line = line.strip()
+                    if line:
+                        try:
+                            new_lines.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+
+            _last_events_size = current_size
+
+            for event in new_lines:
+                event_type = event.get("type", "event")
+                await state.broadcast(f"trace_{event_type}", event)
+        except Exception:
+            pass
+
+
+@app.on_event("startup")
+async def _start_events_watcher() -> None:
+    global _events_watch_task, _last_events_size
+    state = get_state()
+    events_path = state.project_root / ".smm" / "traces" / "events.jsonl"
+    if events_path.exists():
+        _last_events_size = events_path.stat().st_size
+    _events_watch_task = asyncio.create_task(_watch_events_jsonl())
+
+
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
@@ -1776,18 +2450,31 @@ def _load_decisions(root: Path) -> list[Decision]:
 
 
 def _load_contradictions(root: Path) -> list[Contradiction]:
-    """Load contradictions from .smm/contradictions/*.json."""
+    """Load contradictions from .smm/contradictions/*.json.
+
+    Deduplicates by ``id`` field so that multiple files for the same
+    contradiction (e.g. ``contradiction-abc12345.json`` and ``abc12345.json``)
+    don't cause phantom unresolved entries in the dashboard.
+    """
     contradictions_dir = root / ".smm" / "contradictions"
     if not contradictions_dir.is_dir():
         return []
-    contradictions = []
+    seen_ids: dict[str, Contradiction] = {}
     for fp in sorted(contradictions_dir.glob("*.json")):
         try:
             data = json.loads(fp.read_text())
-            contradictions.append(Contradiction(**data))
+            c = Contradiction(**data)
+            cid = str(c.id)
+            if cid not in seen_ids:
+                seen_ids[cid] = c
+            else:
+                # Keep the one that's resolved, or the latest
+                existing = seen_ids[cid]
+                if c.status == ContradictionStatus.RESOLVED and existing.status != ContradictionStatus.RESOLVED:
+                    seen_ids[cid] = c
         except Exception:
             logger.debug("Failed to load contradiction from %s", fp, exc_info=True)
-    return contradictions
+    return list(seen_ids.values())
 
 
 def _load_sessions(root: Path) -> list[dict[str, Any]]:
@@ -1817,8 +2504,249 @@ def _get_raw_entry_jsons(tree: MerkleTree, *, limit: int, offset: int) -> list[s
 
 
 def _save_contradiction(root: Path, c: Contradiction) -> None:
-    """Persist a contradiction back to .smm/contradictions/."""
+    """Persist a contradiction back to .smm/contradictions/.
+
+    Finds ALL existing files with matching ``id`` field, writes the
+    canonical file (contradiction-{id[:8]}.json), and deletes any duplicates.
+    """
     contradictions_dir = root / ".smm" / "contradictions"
     contradictions_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{str(c.id)[:8]}.json"
-    (contradictions_dir / filename).write_text(c.model_dump_json(indent=2))
+
+    target_id = str(c.id)
+    canonical_name = f"contradiction-{target_id[:8]}.json"
+    content = c.model_dump_json(indent=2)
+    matched_files: list[Path] = []
+
+    for fp in contradictions_dir.glob("*.json"):
+        try:
+            data = json.loads(fp.read_text())
+            if data.get("id") == target_id:
+                matched_files.append(fp)
+        except Exception:
+            continue
+
+    # Write canonical file, delete all duplicates
+    canonical_path = contradictions_dir / canonical_name
+    canonical_path.write_text(content)
+    for fp in matched_files:
+        if fp != canonical_path:
+            logger.debug("_save_contradiction: removing duplicate %s (id=%s)", fp.name, target_id)
+            fp.unlink()
+
+
+def _delete_contradiction_lock(project_root: Path) -> None:
+    """Delete .smm/contradiction.lock so the agent can resume writing.
+
+    Called after a human resolves a contradiction via dashboard.
+    This transitions the state machine from CONTRADICTION_DETECTED → RESOLVED → CLEAN.
+    """
+    lock_file = project_root / ".smm" / "contradiction.lock"
+    try:
+        lock_file.unlink(missing_ok=True)
+    except Exception:
+        logger.debug("Failed to delete contradiction.lock", exc_info=True)
+
+
+def _auto_apply_rules(state: "DashboardState") -> None:
+    """Regenerate CLAUDE.md and .cursor/rules/ after a resolution (Bug 4 fix)."""
+    try:
+        from vt_protocol.config import load_governance_config
+        from vt_protocol.prevention.rulesync import sync_rules
+
+        config = load_governance_config(state.project_root)
+        active = [d for d in state.decisions if d.valid]
+        sync_rules(active, state.project_root, config)
+    except Exception:
+        logger.debug("Auto apply rules failed", exc_info=True)
+
+
+def _estimate_llm_cost(model: str, tokens_in: int, tokens_out: int) -> float:
+    """Estimate LLM cost in USD from model name and token counts (Bug 5 fix)."""
+    m = model.lower()
+    if "opus" in m:
+        rate_in, rate_out = 15.0, 75.0
+    elif "haiku" in m:
+        rate_in, rate_out = 0.80, 4.0
+    else:  # sonnet / default
+        rate_in, rate_out = 3.0, 15.0
+    return (tokens_in * rate_in + tokens_out * rate_out) / 1_000_000
+
+
+def _log_resolution_trace_event(root: Path, c: Contradiction, winner_id: str, winner_title: str) -> None:
+    """Log contradiction resolution to .smm/traces/events.jsonl."""
+    traces_dir = root / ".smm" / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    event = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "type": "contradiction_resolved",
+        "action": "resolve_contradiction",
+        "file": "",
+        "result": "pass",
+        "reason": f"Winner: {winner_title}. {c.decision_a_title} vs {c.decision_b_title}",
+        "agent": c.resolved_by or "dashboard",
+        "contradiction_id": str(c.id),
+        "winner_id": winner_id,
+    }
+    try:
+        with open(traces_dir / "events.jsonl", "a") as f:
+            f.write(json.dumps(event) + "\n")
+    except Exception:
+        logger.debug("Failed to write resolution trace event", exc_info=True)
+
+
+def _generate_imperative_rule(assumption: Any) -> str:
+    """Generate a clean, imperative constraint rule from a validated assumption.
+
+    Instead of dumping raw code evidence, produces a human-readable rule
+    that Claude can follow when writing code.
+    """
+    pattern_id = getattr(assumption, "pattern_id", "")
+    evidence = assumption.code_evidence[0] if assumption.code_evidence else None
+    snippet = evidence.snippet if evidence else ""
+    file_path = evidence.file if evidence else ""
+    rationale = assumption.answer_rationale or "Confirmed by domain expert."
+
+    # Extract contextual names from evidence where possible
+    import re
+
+    if pattern_id == "single_source_write":
+        # Try to extract function and table names from summary/evidence
+        func_match = re.search(r'(\w+)\(\)', assumption.summary)
+        table_match = re.search(r"['\"](\w+)['\"]", snippet) or re.search(r'to\s+(\w+)', assumption.summary)
+        func_name = func_match.group(1) if func_match else "the designated function"
+        table_name = table_match.group(1) if table_match else "this table"
+        return (
+            f"Only {func_name}() may write to {table_name}. "
+            f"Do not introduce direct writes from other modules without explicit approval.\n\n"
+            f"Rationale: {rationale}"
+        )
+
+    elif pattern_id == "env_no_fallback":
+        var_match = re.search(r"environ\[?['\"](\w+)", snippet) or re.search(r'(\w+)', assumption.summary)
+        var_name = var_match.group(1) if var_match else "this environment variable"
+        return (
+            f"Environment variable {var_name} must always be set in deployment. "
+            f"Do not access it without a fallback or validation at startup.\n\n"
+            f"Rationale: {rationale}"
+        )
+
+    elif pattern_id == "single_table_query":
+        table_match = re.search(r"(\w+)", assumption.summary)
+        table_name = table_match.group(1) if table_match else "this table"
+        return (
+            f"Queries to {table_name} do not require JOINs in the current architecture. "
+            f"Do not add JOINs without verifying the data model has changed.\n\n"
+            f"Rationale: {rationale}"
+        )
+
+    elif pattern_id == "no_auth_check":
+        return (
+            f"Authentication is not required for this endpoint in the current design. "
+            f"Do not add auth middleware without reviewing access requirements.\n\n"
+            f"Rationale: {rationale}"
+        )
+
+    elif pattern_id == "hardcoded_timeout":
+        return (
+            f"The timeout value in this code is intentionally hardcoded. "
+            f"Do not extract it to configuration without understanding the failure mode.\n\n"
+            f"Rationale: {rationale}"
+        )
+
+    # Generic fallback — still imperative, not raw evidence
+    category_label = assumption.category.value.replace("_", " ")
+    return (
+        f"{assumption.summary}\n\n"
+        f"This is a validated {category_label} constraint. "
+        f"Do not change this behavior without explicit approval.\n\n"
+        f"Rationale: {rationale}"
+    )
+
+
+def _create_decision_from_assumption(state: "DashboardState", assumption: Any) -> bool:
+    """Create a new decision from a validated assumption so it becomes a CLAUDE.md rule.
+
+    Returns True if the decision was created successfully.
+    """
+    title = f"Validated: {assumption.summary[:80]}"
+    content = _generate_imperative_rule(assumption)
+
+    # Map assumption category to a dimension
+    _CATEGORY_TO_DIMENSION = {
+        "data_scope": Dimension.DATABASE,
+        "temporal": Dimension.STATE_MANAGEMENT,
+        "access": Dimension.AUTH,
+        "completeness": Dimension.TESTING,
+        "configuration": Dimension.DEPLOYMENT,
+        "framework": Dimension.API_STYLE,
+    }
+    dimension = _CATEGORY_TO_DIMENSION.get(assumption.category.value, Dimension.API_STYLE)
+
+    decision = Decision(
+        title=title,
+        content=content,
+        rationale=f"Validated assumption: {assumption.summary}",
+        dimensions=[dimension],
+        decision_type=DecisionType.ARCHITECTURAL,
+        made_by=assumption.resolved_by or "dashboard-user",
+        project="",
+        source_type=SourceType.AGENT,
+    )
+
+    # Save to disk
+    decisions_dir = state.project_root / ".smm" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{str(decision.id)[:8]}.json"
+    (decisions_dir / filename).write_text(decision.model_dump_json(indent=2))
+
+    # Add to in-memory state
+    state.decisions.append(decision)
+    logger.info("Created decision from validated assumption: %s", title)
+    return True
+
+
+def _log_assumption_trace_event(root: Path, assumption: Any) -> None:
+    """Log assumption resolution to .smm/traces/events.jsonl."""
+    traces_dir = root / ".smm" / "traces"
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    event = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "type": f"assumption_{assumption.status.value}",
+        "action": "resolve_assumption",
+        "file": "",
+        "result": "pass" if assumption.status.value == "validated" else "info",
+        "reason": assumption.summary,
+        "agent": assumption.resolved_by or "dashboard",
+    }
+    try:
+        with open(traces_dir / "events.jsonl", "a") as f:
+            f.write(json.dumps(event) + "\n")
+    except Exception:
+        logger.debug("Failed to write assumption trace event", exc_info=True)
+
+
+def _save_decision(root: Path, d: Decision) -> None:
+    """Persist a decision back to .smm/decisions/.
+
+    Finds the existing file by reading each JSON and matching the ``id``
+    field, then overwrites in place.  This works regardless of filename
+    convention (``001-database-relational.json``, ``<uuid>.json``, etc.).
+    """
+    decisions_dir = root / ".smm" / "decisions"
+    decisions_dir.mkdir(parents=True, exist_ok=True)
+
+    target_id = str(d.id)
+    for fp in decisions_dir.glob("*.json"):
+        try:
+            data = json.loads(fp.read_text())
+            if data.get("id") == target_id:
+                logger.debug("_save_decision: overwriting %s (id=%s)", fp.name, target_id)
+                fp.write_text(d.model_dump_json(indent=2))
+                return
+        except Exception:
+            continue
+
+    # No existing file found — write new
+    logger.debug("_save_decision: creating new file for id=%s", target_id)
+    filename = f"{str(d.id)[:8]}.json"
+    (decisions_dir / filename).write_text(d.model_dump_json(indent=2))

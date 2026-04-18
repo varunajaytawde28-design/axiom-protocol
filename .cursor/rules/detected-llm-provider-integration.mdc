@@ -1,0 +1,8 @@
+---
+description: "Detected: LLM Provider Integration"
+alwaysApply: true
+---
+
+# Detected: LLM Provider Integration
+
+This project uses llm provider integration via anthropic and openai. Do not introduce other LLM providers, alternative LLM frameworks without explicit approval.

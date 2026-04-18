@@ -1,0 +1,23 @@
+{
+  "id": "7eddac34-5ee6-4154-8341-d87d7d8562b4",
+  "title": "Detected: Encryption",
+  "content": "This project uses encryption via pynacl. Do not introduce alternative cryptography libraries without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:pynacl",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "security"
+  ],
+  "constraints": [
+    "This project uses encryption via pynacl. Do not introduce alternative cryptography libraries without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948421Z",
+  "valid": true
+}

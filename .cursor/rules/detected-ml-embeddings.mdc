@@ -1,0 +1,8 @@
+---
+description: "Detected: ML Embeddings"
+alwaysApply: true
+---
+
+# Detected: ML Embeddings
+
+This project uses ml embeddings via sentence-transformers and scikit-learn. Do not introduce alternative embedding/ML frameworks without explicit approval.

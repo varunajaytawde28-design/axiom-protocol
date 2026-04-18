@@ -68,6 +68,158 @@ class AssumptionPattern:
     base_confidence: float
     summary_template: str = ""
     multiline: bool = False
+    tier: str = "implementation"  # "architectural" or "implementation"
+
+
+# ---------------------------------------------------------------------------
+# Tiered confidence thresholds (Improvement #2)
+# ---------------------------------------------------------------------------
+# ARCHITECTURAL tier (data_scope, configuration, framework): surface at >0.4,
+#   tolerate 15% FP rate. These are high-value, hard-to-detect assumptions.
+# IMPLEMENTATION tier (completeness, null-checks, pagination): surface at >0.7,
+#   enforce sub-5% FP. These are lower-value, high-volume patterns.
+
+TIER_THRESHOLDS: dict[str, float] = {
+    "architectural": 0.4,
+    "implementation": 0.7,
+}
+
+# Categories mapped to tiers
+_ARCHITECTURAL_CATEGORIES: frozenset[str] = frozenset({
+    "data_scope", "configuration", "framework",
+})
+
+_IMPLEMENTATION_CATEGORIES: frozenset[str] = frozenset({
+    "completeness", "temporal", "access",
+})
+
+
+def get_tier_for_category(category: AssumptionCategory) -> str:
+    """Return 'architectural' or 'implementation' based on category."""
+    if category.value in _ARCHITECTURAL_CATEGORIES:
+        return "architectural"
+    return "implementation"
+
+
+def get_tiered_threshold(tier: str) -> float:
+    """Return the confidence threshold for a given tier."""
+    return TIER_THRESHOLDS.get(tier, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Pattern Stats Tracking — Statistical Auto-Disable (Improvement #5)
+# ---------------------------------------------------------------------------
+
+_PatternStatsDict = dict[str, dict[str, int | float]]
+
+
+def load_pattern_stats(root: Path) -> _PatternStatsDict:
+    """Load pattern stats from .smm/pattern_stats.json."""
+    import json
+    stats_path = root / ".smm" / "pattern_stats.json"
+    if not stats_path.is_file():
+        return {}
+    try:
+        return json.loads(stats_path.read_text())
+    except Exception:
+        logger.warning("Failed to load pattern stats from %s", stats_path)
+        return {}
+
+
+def save_pattern_stats(root: Path, stats: _PatternStatsDict) -> None:
+    """Save pattern stats to .smm/pattern_stats.json."""
+    import json
+    smm_dir = root / ".smm"
+    smm_dir.mkdir(parents=True, exist_ok=True)
+    stats_path = smm_dir / "pattern_stats.json"
+    stats_path.write_text(json.dumps(stats, indent=2))
+
+
+def update_pattern_stats(
+    stats: _PatternStatsDict,
+    pattern_id: str,
+    event: str,
+) -> _PatternStatsDict:
+    """Increment a counter for a pattern. event: 'triggered'|'validated'|'rejected'|'deferred'."""
+    if pattern_id not in stats:
+        stats[pattern_id] = {
+            "times_triggered": 0,
+            "validated": 0,
+            "rejected": 0,
+            "deferred": 0,
+            "mode": "active",
+        }
+    key_map = {
+        "triggered": "times_triggered",
+        "validated": "validated",
+        "rejected": "rejected",
+        "deferred": "deferred",
+    }
+    stat_key = key_map.get(event, event)
+    stats[pattern_id][stat_key] = stats[pattern_id].get(stat_key, 0) + 1
+    return stats
+
+
+def check_shadow_mode(stats: _PatternStatsDict, pattern_id: str) -> bool:
+    """Check if a pattern should be in SHADOW mode.
+
+    Shadow mode: rejection_ratio > 0.90 AND times_triggered >= 20.
+    Pattern still runs but results are not surfaced to the user.
+    """
+    entry = stats.get(pattern_id)
+    if entry is None:
+        return False
+    triggered = entry.get("times_triggered", 0)
+    if triggered < 20:
+        return False
+    rejected = entry.get("rejected", 0)
+    validated = entry.get("validated", 0)
+    resolved = rejected + validated
+    if resolved == 0:
+        return False
+    rejection_ratio = rejected / resolved
+    return rejection_ratio > 0.90
+
+
+def get_pattern_mode(stats: _PatternStatsDict, pattern_id: str) -> str:
+    """Return 'active' or 'shadow' for a pattern."""
+    if check_shadow_mode(stats, pattern_id):
+        return "shadow"
+    entry = stats.get(pattern_id)
+    if entry and entry.get("mode") == "shadow":
+        return "shadow"
+    return "active"
+
+
+def set_pattern_mode(stats: _PatternStatsDict, pattern_id: str, mode: str) -> _PatternStatsDict:
+    """Manually set a pattern's mode ('active' or 'shadow')."""
+    if pattern_id not in stats:
+        stats[pattern_id] = {
+            "times_triggered": 0,
+            "validated": 0,
+            "rejected": 0,
+            "deferred": 0,
+            "mode": mode,
+        }
+    else:
+        stats[pattern_id]["mode"] = mode
+    return stats
+
+
+def compute_rule_roi(stats: _PatternStatsDict, pattern_id: str) -> float:
+    """Compute Rule ROI: validated / (triggered × 0.1).
+
+    Higher = better return on cognitive investment.
+    0.1 = estimated cognitive cost per trigger.
+    """
+    entry = stats.get(pattern_id)
+    if entry is None:
+        return 0.0
+    triggered = entry.get("times_triggered", 0)
+    validated = entry.get("validated", 0)
+    if triggered == 0:
+        return 0.0
+    return validated / (triggered * 0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +257,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="high",
         base_confidence=0.7,
         summary_template="Write to {match} found in one location — assumes no external write sources",
+        tier="architectural",
     ))
 
     # 2. narrow_where_clause — WHERE with small literal set
@@ -119,6 +272,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.6,
         summary_template="WHERE clause filters on literal values — assumes data subset is complete",
+        tier="architectural",
     ))
 
     # 3. single_table_query — SELECT FROM without JOIN
@@ -135,6 +289,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         base_confidence=0.5,
         multiline=True,
         summary_template="Query reads from single table {match} without JOINs — assumes no cross-table relationships needed",
+        tier="architectural",
     ))
 
     # 4. hardcoded_table_name — __tablename__, Table(), or raw SQL table references
@@ -152,6 +307,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="low",
         base_confidence=0.5,
         summary_template="Hardcoded table name '{match}' — track for schema evolution",
+        tier="architectural",
     ))
 
     # === TEMPORAL ===
@@ -172,6 +328,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="high",
         base_confidence=0.7,
         summary_template="Hardcoded date '{match}' — assumes fixed temporal boundary",
+        tier="implementation",
     ))
 
     # 6. no_migration_check — DB write without migration logic nearby
@@ -191,6 +348,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="low",
         base_confidence=0.4,
         summary_template="DB write without migration/backfill logic — assumes schema is stable",
+        tier="implementation",
     ))
 
     # === ACCESS ===
@@ -214,6 +372,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="high",
         base_confidence=0.7,
         summary_template="Single role check '{match}' — assumes no additional access control needed",
+        tier="implementation",
     ))
 
     # 8. single_endpoint — one route for a resource
@@ -231,6 +390,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.5,
         summary_template="Single endpoint '{match}' for resource — assumes no alternative access paths",
+        tier="implementation",
     ))
 
     # 9. no_multitenancy — DB queries without tenant/org filter
@@ -252,6 +412,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         base_confidence=0.4,
         multiline=True,
         summary_template="DB query without tenant/org filter — assumes single-tenant access",
+        tier="implementation",
     ))
 
     # === COMPLETENESS ===
@@ -272,6 +433,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.6,
         summary_template="Incomplete status/enum check '{match}' — may not cover all possible states",
+        tier="implementation",
     ))
 
     # 11. no_null_handling — dict key access without .get() or result without None check
@@ -290,6 +452,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.5,
         summary_template="Direct access without null check — assumes '{match}' always exists",
+        tier="implementation",
     ))
 
     # 12. no_pagination — .all() or SELECT * without LIMIT
@@ -309,6 +472,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.5,
         summary_template="Unbounded query '{match}' — assumes result set fits in memory",
+        tier="implementation",
     ))
 
     # 13. no_error_path — bare except pass or missing except for DB/HTTP calls
@@ -328,6 +492,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         base_confidence=0.4,
         multiline=True,
         summary_template="Bare except/pass — swallows errors, assumes happy path always succeeds",
+        tier="implementation",
     ))
 
     # === CONFIGURATION ===
@@ -346,6 +511,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="high",
         base_confidence=0.7,
         summary_template="Environment variable '{match}' accessed without fallback — assumes always set",
+        tier="architectural",
     ))
 
     # 15. hardcoded_path — literal filesystem paths
@@ -368,6 +534,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.6,
         summary_template="Hardcoded path '{match}' — assumes fixed filesystem layout",
+        tier="architectural",
     ))
 
     # 16. hardcoded_port — common port numbers in bind/connect context
@@ -389,6 +556,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.5,
         summary_template="Hardcoded port {match} — assumes fixed network configuration",
+        tier="architectural",
     ))
 
     # === FRAMEWORK ===
@@ -404,6 +572,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.6,
         summary_template="relationship() without explicit loading strategy — assumes SQLAlchemy default (lazy='select')",
+        tier="architectural",
     ))
 
     # 18. no_cascade_behavior — ForeignKey without on_delete/cascade
@@ -420,6 +589,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.6,
         summary_template="ForeignKey without explicit cascade behavior — assumes framework default on delete",
+        tier="architectural",
     ))
 
     # 19. framework_version_dep — imports from framework internals
@@ -447,6 +617,7 @@ def _build_patterns() -> tuple[AssumptionPattern, ...]:
         severity="medium",
         base_confidence=0.5,
         summary_template="Import from framework internals '{match}' — may break on version upgrade",
+        tier="architectural",
     ))
 
     return tuple(patterns)

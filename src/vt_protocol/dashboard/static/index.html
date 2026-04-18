@@ -4,278 +4,457 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VT Protocol Dashboard</title>
-<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/layout-base@2.0.1/layout-base.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cose-base@2.2.0/cose-base.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
 <style>
-/* ===== DESIGN TOKENS ===== */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* ===== RESET ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ===== DESIGN TOKENS — Light (default) ===== */
 :root {
-  /* Fonts */
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', monospace;
-  /* Spacing & radius */
-  --radius: 8px;
-  --radius-sm: 4px;
-  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
-  /* Density */
-  --row-h: 48px;
-}
-/* Light theme (default) */
-body, body.light {
-  --bg: #ffffff;
-  --bg-card: #f8f9fa;
-  --bg-surface: #f0f1f3;
-  --border: #e2e4e8;
-  --border-focus: #c8ccd4;
+  /* Backgrounds */
+  --bg: #f8f9fa;
+  --bg-card: #ffffff;
+  --bg-surface: #f0f2f7;
+  --bg-elevated: #e8ebf4;
+
+  /* Borders */
+  --border: #dde1ec;
+  --border-focus: #c0c6d8;
+
+  /* Brand — Indigo */
+  --indigo: #6d28d9;
+  --indigo-dim: rgba(109,40,217,0.08);
+  --indigo-glow: rgba(109,40,217,0.2);
+
+  /* Typography */
+  --text: #14151f;
+  --text-muted: #505672;
+  --text-dim: #9ca3af;
+  --link-hover: #5b21b6;
+  --selection-bg: rgba(109,40,217,0.2);
+
+  /* Semantic states */
   --red: #dc2626;
   --amber: #d97706;
   --green: #059669;
-  --indigo: #4f46e5;
-  --indigo-dim: rgba(79,70,229,0.08);
+  --cyan: #0891b2;
   --cat-cyan: #0891b2;
   --cat-orange: #ea580c;
   --cat-pink: #db2777;
-  --text: #1a1a2e;
-  --text-muted: #6b7280;
-  --text-dim: #9ca3af;
-  --link-hover: #3730a3;
-  --selection-bg: rgba(79,70,229,0.2);
-  --overlay-bg: rgba(0,0,0,0.3);
-  --shadow: rgba(0,0,0,0.08);
+
+  /* Misc */
+  --overlay-bg: rgba(0,0,0,0.35);
+  --shadow: rgba(0,0,0,0.1);
+
+  /* Fonts */
+  --font: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', monospace;
+
+  /* 8pt spacing grid */
+  --radius: 8px;
+  --radius-sm: 4px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-6: 24px; --space-8: 32px;
+
+  /* Major Second type scale */
+  --text-xs: 12px; --text-sm: 14px; --text-md: 16px; --text-lg: 18px;
+  --text-xl: 20px; --text-2xl: 22px; --text-3xl: 32px;
+
+  /* Density */
+  --row-h: 48px;
 }
-/* Dark theme */
+
+/* Dark mode override — theme toggle */
 body.dark {
-  --bg: #08080C;
-  --bg-card: #12121A;
-  --bg-surface: #1a1a26;
-  --border: #1F1F2E;
-  --border-focus: #3a3a50;
-  --red: #F87171;
-  --amber: #FBBF24;
-  --green: #34D399;
-  --indigo: #818CF8;
-  --indigo-dim: rgba(129,140,248,0.08);
-  --cat-cyan: #22d3ee;
-  --cat-orange: #fb923c;
-  --cat-pink: #f472b6;
-  --text: #e4e4ef;
-  --text-muted: #8888a0;
-  --text-dim: #555568;
-  --link-hover: #a5b4fc;
-  --selection-bg: rgba(129,140,248,0.3);
-  --overlay-bg: rgba(0,0,0,0.6);
-  --shadow: rgba(0,0,0,0.3);
+  --bg: #0b0c0f; --bg-card: #16181d; --bg-surface: #1e2028; --bg-elevated: #2a2d35;
+  --border: #2a2d35; --border-focus: #3d4050;
+  --indigo: #7c3aed; --indigo-dim: rgba(124,58,237,0.1); --indigo-glow: rgba(124,58,237,0.25);
+  --text: #f8fafe; --text-muted: #a1a8b8; --text-dim: #6b7280;
+  --link-hover: #a78bfa; --selection-bg: rgba(124,58,237,0.25);
+  --overlay-bg: rgba(0,0,0,0.75); --shadow: rgba(0,0,0,0.5);
+  --red: #ef4444; --amber: #f59e0b; --green: #10b981; --cyan: #06b6d4;
+  --cat-cyan: #06b6d4; --cat-orange: #f97316; --cat-pink: #ec4899;
 }
+
+/* Light class is the default; no overrides needed */
+body.light {}
+
 body.high-density { --row-h: 32px; --space-4: 10px; }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 13px; line-height: 1.5; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
 a { color: var(--indigo); text-decoration: none; }
 a:hover { color: var(--link-hover); }
 ::selection { background: var(--selection-bg); }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-focus); }
 
 /* ===== LAYOUT SHELL ===== */
 .app { display: flex; height: 100vh; overflow: hidden; }
 
-/* Primary sidebar — 5 workspaces */
-.sidebar { width: 200px; background: var(--bg-card); border-right: 1px solid var(--border); flex-shrink: 0; display: flex; flex-direction: column; z-index: 10; }
-.sidebar-logo { padding: 16px; font-size: 14px; font-weight: 700; color: var(--indigo); letter-spacing: 0.5px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-.sidebar-logo .sub { color: var(--text-muted); font-weight: 400; font-size: 11px; display: block; margin-top: 2px; }
-.sidebar-nav { flex: 1; padding: 8px 0; }
-.nav-item { padding: 10px 16px; cursor: pointer; font-size: 13px; color: var(--text-muted); transition: all 0.15s; display: flex; align-items: center; gap: 10px; border-left: 3px solid transparent; }
-.nav-item:hover { background: var(--bg-surface); color: var(--text); }
-.nav-item.active { color: var(--indigo); background: var(--indigo-dim); border-left-color: var(--indigo); font-weight: 600; }
-.nav-item .icon { width: 18px; text-align: center; font-size: 14px; }
+/* ===== SIDEBAR — fixed 220px ===== */
+.sidebar {
+  width: 220px;
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+.sidebar-logo {
+  padding: 18px 20px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.3px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.sidebar-logo .sub { color: var(--text-dim); font-weight: 400; font-size: 11px; display: block; margin-top: 2px; letter-spacing: 0.3px; }
+.sidebar-nav { flex: 1; padding: 8px 0; overflow-y: auto; }
+.nav-item {
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-dim);
+  transition: color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-left: 2px solid transparent;
+  letter-spacing: 0.1px;
+}
+.nav-item:hover { background: var(--bg-surface); color: var(--text-muted); }
+.nav-item.active { color: var(--text); background: rgba(124,58,237,0.08); border-left-color: var(--indigo); font-weight: 600; }
+.nav-item .icon { width: 18px; text-align: center; font-size: 14px; opacity: 0.8; }
 .nav-item .badge { margin-left: auto; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center; }
-.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
-.sidebar-footer kbd { background: var(--bg-surface); border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; font-family: var(--mono); font-size: 10px; }
+.sidebar-footer { padding: 14px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
+.sidebar-footer kbd { background: var(--bg-surface); border: 1px solid var(--border-focus); padding: 1px 5px; border-radius: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-muted); }
 
-/* Main content area */
+/* ===== MAIN AREA ===== */
 .main-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .main-scroll { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
 
 /* ===== GOVERNANCE INTERNAL SIDEBAR ===== */
 .workspace-with-sidebar { display: flex; height: 100%; overflow: hidden; }
 .internal-sidebar { width: 180px; background: var(--bg); border-right: 1px solid var(--border); flex-shrink: 0; padding: 16px 0; overflow-y: auto; }
-.internal-nav { padding: 6px 12px; cursor: pointer; font-size: 12px; color: var(--text-muted); border-radius: var(--radius-sm); margin: 2px 8px; transition: all 0.12s; }
-.internal-nav:hover { background: var(--bg-surface); color: var(--text); }
+.internal-nav { padding: 8px 14px; cursor: pointer; font-size: 12px; color: var(--text-dim); border-radius: var(--radius-sm); margin: 2px 8px; transition: all 0.12s; }
+.internal-nav:hover { background: var(--bg-surface); color: var(--text-muted); }
 .internal-nav.active { background: var(--indigo-dim); color: var(--indigo); font-weight: 600; }
 .internal-content { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
 
 /* ===== LATTICE SPLIT PANE ===== */
 .lattice-layout { display: flex; height: 100%; overflow: hidden; }
-.lattice-filters { width: 20%; min-width: 180px; max-width: 260px; background: var(--bg); border-right: 1px solid var(--border); padding: var(--space-4); overflow-y: auto; flex-shrink: 0; }
-.lattice-feed { width: 40%; border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
-.lattice-detail { width: 40%; overflow-y: auto; background: var(--bg-card); }
+.lattice-filters { width: 220px; min-width: 180px; max-width: 260px; background: var(--bg); border-right: 1px solid var(--border); padding: var(--space-4); overflow-y: auto; flex-shrink: 0; }
+.lattice-feed { flex: 0 0 40%; border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; display: flex; flex-direction: column; }
+.lattice-detail { flex: 1; overflow-y: auto; background: var(--bg-card); }
 .lattice-detail-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); font-size: 13px; }
+
+/* Live feed header */
+.feed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+/* Live heartbeat indicator */
+.heartbeat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+  animation: pulse-heartbeat 2s ease-in-out infinite;
+}
+@keyframes pulse-heartbeat {
+  0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.7); }
+  50%  { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
 
 /* Filter panel */
 .filter-group { margin-bottom: 16px; }
-.filter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
-.filter-select, .filter-input { width: 100%; padding: 6px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 12px; font-family: var(--font); outline: none; }
-.filter-select:focus, .filter-input:focus { border-color: var(--indigo); }
+.filter-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 700; margin-bottom: 6px; }
+.filter-select, .filter-input {
+  width: 100%;
+  padding: 7px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.filter-select:focus, .filter-input:focus { border-color: var(--indigo); box-shadow: 0 0 0 2px var(--indigo-dim); }
+.filter-select option { background: var(--bg-card); }
 
-/* Feed rows */
-.feed-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; min-height: var(--row-h); }
+/* Feed rows with slide-in animation */
+.feed-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+  min-height: var(--row-h);
+  animation: slideInFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.feed-row:nth-child(1) { animation-delay: 0.00s; }
+.feed-row:nth-child(2) { animation-delay: 0.05s; }
+.feed-row:nth-child(3) { animation-delay: 0.10s; }
+.feed-row:nth-child(4) { animation-delay: 0.15s; }
+.feed-row:nth-child(5) { animation-delay: 0.20s; }
+.feed-row:nth-child(n+6) { animation-delay: 0.25s; }
+
+@keyframes slideInFade {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .feed-row:hover { background: var(--bg-surface); }
-.feed-row.active { background: var(--indigo-dim); border-left: 3px solid var(--indigo); }
+.feed-row.active { background: rgba(124,58,237,0.07); border-left: 2px solid var(--indigo); padding-left: 12px; }
 .feed-icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
-.feed-icon.llm { background: rgba(129,140,248,0.15); color: var(--indigo); }
-.feed-icon.tool { background: rgba(52,211,153,0.15); color: var(--green); }
-.feed-icon.shell { background: rgba(251,191,36,0.15); color: var(--amber); }
-.feed-icon.git { background: rgba(248,113,113,0.15); color: var(--red); }
-.feed-icon.file { background: rgba(136,136,160,0.15); color: var(--text-muted); }
+.feed-icon.llm  { background: rgba(124,58,237,0.15); color: var(--indigo); }
+.feed-icon.tool { background: rgba(16,185,129,0.15);  color: var(--green); }
+.feed-icon.shell{ background: rgba(245,158,11,0.15);  color: var(--amber); }
+.feed-icon.git  { background: rgba(239,68,68,0.15);   color: var(--red); }
+.feed-icon.file { background: rgba(107,114,128,0.12); color: var(--text-dim); }
 .feed-body { flex: 1; min-width: 0; }
-.feed-title { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.feed-meta { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
-.feed-time { font-size: 10px; color: var(--text-dim); font-family: var(--mono); flex-shrink: 0; }
-.feed-severity { font-size: 10px; font-weight: 600; text-transform: uppercase; flex-shrink: 0; }
+.feed-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.feed-meta  { font-size: 11px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
+.feed-time  { font-size: 10px; color: var(--text-dim); font-family: var(--mono); flex-shrink: 0; }
+.feed-severity { font-size: 10px; font-weight: 700; text-transform: uppercase; flex-shrink: 0; letter-spacing: 0.5px; }
 .feed-severity.critical { color: var(--red); }
-.feed-severity.warning { color: var(--amber); }
-.feed-severity.info { color: var(--text-dim); }
+.feed-severity.warning  { color: var(--amber); }
+.feed-severity.info     { color: var(--text-dim); }
 
 /* Detail pane tabs */
 .detail-tabs { display: flex; border-bottom: 1px solid var(--border); }
-.detail-tab { padding: 10px 16px; font-size: 12px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
-.detail-tab:hover { color: var(--text); }
+.detail-tab { padding: 10px 16px; font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.detail-tab:hover { color: var(--text-muted); }
 .detail-tab.active { color: var(--indigo); border-bottom-color: var(--indigo); }
 .detail-body { padding: var(--space-4); }
 
 /* ===== AXIOM TABS ===== */
-.axiom-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); padding: 0 var(--space-8); background: var(--bg-card); }
-.axiom-tab { padding: 12px 20px; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
-.axiom-tab:hover { color: var(--text); }
-.axiom-tab.active { color: var(--indigo); border-bottom-color: var(--indigo); }
+.axiom-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 var(--space-8); background: var(--bg-card); }
+.axiom-tab { padding: 14px 20px; font-size: 13px; font-weight: 600; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.axiom-tab:hover { color: var(--text-muted); }
+.axiom-tab.active { color: var(--text); border-bottom-color: var(--indigo); }
 .axiom-tab .count { display: inline-block; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
 .axiom-content { flex: 1; overflow-y: auto; padding: var(--space-6) var(--space-8); }
 
-/* ===== CARDS ===== */
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
-.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
-.card-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 4px; }
-.card-value { font-size: 28px; font-weight: 700; font-family: var(--mono); }
-.card-value.green { color: var(--green); }
-.card-value.red { color: var(--red); }
-.card-value.amber { color: var(--amber); }
+/* ===== CARDS — KPI style ===== */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-4); margin-bottom: var(--space-6); }
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+  box-shadow: 0 1px 3px var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.card:hover { border-color: var(--border-focus); }
+body.dark .card { box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+.card-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
+.card-value { font-size: var(--text-3xl); font-weight: 700; font-family: var(--mono); line-height: 1; letter-spacing: -1px; }
+.card-value.green  { color: var(--green); }
+.card-value.red    { color: var(--red); }
+.card-value.amber  { color: var(--amber); }
 .card-value.indigo { color: var(--indigo); }
-.card-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.card-sub { font-size: 12px; color: var(--text-dim); margin-top: 6px; }
 
-/* Status badges with dual encoding (color + icon) */
-.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
-.badge.critical { background: rgba(248,113,113,0.15); color: var(--red); }
+/* ===== BADGES ===== */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px; }
+.badge.critical { background: rgba(239,68,68,0.12);   color: var(--red); }
 .badge.critical::before { content: '\26A0'; }
-.badge.warning { background: rgba(251,191,36,0.15); color: var(--amber); }
-.badge.warning::before { content: '\25D0'; }
-.badge.success { background: rgba(52,211,153,0.15); color: var(--green); }
-.badge.success::before { content: '\2713'; }
-.badge.info { background: rgba(129,140,248,0.12); color: var(--indigo); }
-.badge.neutral { background: rgba(136,136,160,0.1); color: var(--text-muted); }
+.badge.warning  { background: rgba(245,158,11,0.12);  color: var(--amber); }
+.badge.warning::before  { content: '\25D0'; }
+.badge.success  { background: rgba(16,185,129,0.12);  color: var(--green); }
+.badge.success::before  { content: '\2713'; }
+.badge.info     { background: rgba(124,58,237,0.1);   color: var(--indigo); }
+.badge.neutral  { background: rgba(107,114,128,0.1);  color: var(--text-muted); }
 
 /* ===== BUTTONS ===== */
-.btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text); cursor: pointer; transition: all 0.15s; font-family: var(--font); }
-.btn:hover { border-color: var(--indigo); color: var(--indigo); }
+.btn { padding: 7px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; border: 1px solid var(--border-focus); background: var(--bg-surface); color: var(--text-muted); cursor: pointer; transition: all 0.15s cubic-bezier(0.16,1,0.3,1); font-family: var(--font); }
+.btn:hover { border-color: var(--indigo); color: var(--text); background: var(--bg-elevated); }
 .btn.primary { background: var(--indigo); border-color: var(--indigo); color: #fff; }
-.btn.primary:hover { background: #6366f1; }
-.btn.danger { border-color: var(--red); color: var(--red); }
-.btn.danger:hover { background: rgba(248,113,113,0.1); }
+.btn.primary:hover { background: #6d28d9; box-shadow: 0 0 0 3px var(--indigo-glow); }
+.btn.danger { border-color: rgba(239,68,68,0.4); color: var(--red); background: transparent; }
+.btn.danger:hover { background: rgba(239,68,68,0.1); border-color: var(--red); }
+
+.btn-view { padding: 6px 14px; font-size: 12px; font-weight: 600; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-dim); border-radius: 6px; cursor: pointer; transition: all 0.15s; font-family: var(--font); }
+.btn-view:hover { color: var(--text-muted); border-color: var(--border-focus); }
+.btn-view.active { background: var(--indigo); color: #fff; border-color: var(--indigo); box-shadow: 0 0 0 2px var(--indigo-glow); }
 
 /* ===== TABLES ===== */
 .table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; padding: 10px 14px; background: var(--bg-surface); color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
-td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+th { text-align: left; padding: 10px 16px; background: var(--bg-surface); color: var(--text-dim); font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; border-bottom: 1px solid var(--border); }
+td { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: rgba(129,140,248,0.03); }
+tr:hover td { background: rgba(124,58,237,0.04); color: var(--text); }
 tr { height: var(--row-h); }
 
 /* ===== CONTRADICTION RESOLUTION CARD ===== */
-.contra-full { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
-.contra-full-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+.contra-full { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03); }
+.contra-full-header { padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; background: var(--bg-surface); }
 .contra-full-cols { display: grid; grid-template-columns: 1fr 1fr; }
 .contra-col { padding: 16px 20px; }
 .contra-col:first-child { border-right: 1px solid var(--border); }
-.contra-col-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 600; margin-bottom: 8px; }
-.contra-col h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.contra-col-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); font-weight: 700; margin-bottom: 8px; }
+.contra-col h4 { font-size: 14px; font-weight: 600; margin-bottom: 4px; color: var(--text); }
 .contra-col .meta { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
-.contra-col pre { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; line-height: 1.6; }
+.contra-col pre { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 10px; border-radius: var(--radius-sm); overflow-x: auto; line-height: 1.6; color: var(--text-muted); border: 1px solid var(--border); }
 .contra-rationale { padding: 0 20px 12px; }
 .contra-rationale summary { cursor: pointer; font-size: 12px; color: var(--text-muted); font-weight: 600; padding: 8px 0; }
 .contra-rationale .text { font-size: 12px; color: var(--text-muted); line-height: 1.6; padding: 4px 0 8px; }
 .contra-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; position: sticky; bottom: 0; background: var(--bg-card); }
 
 /* ===== DIMENSION TAGS ===== */
-.dim-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin-right: 3px; }
+.dim-tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-right: 3px; }
 
 /* ===== SIGNAL INDICATORS ===== */
 .signal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
-.signal-dot.red { background: var(--red); box-shadow: 0 0 6px rgba(248,113,113,0.4); }
-.signal-dot.amber { background: var(--amber); box-shadow: 0 0 6px rgba(251,191,36,0.4); }
-.signal-dot.green { background: var(--green); box-shadow: 0 0 6px rgba(52,211,153,0.4); }
+.signal-dot.red   { background: var(--red);   box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+.signal-dot.amber { background: var(--amber); box-shadow: 0 0 6px rgba(245,158,11,0.5); }
+.signal-dot.green { background: var(--green); box-shadow: 0 0 6px rgba(16,185,129,0.5); }
 
-/* ===== GRAPH ===== */
+/* ===== GRAPH CONTAINER ===== */
 .graph-container { width: 100%; height: calc(100vh - 160px); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+@keyframes contradictionPulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+/* Cytoscape — dot-matrix engineering grid background */
+#cy {
+  width: 100%;
+  height: calc(100vh - 230px);
+  background-color: var(--bg-card);
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ===== DECISION MODAL ===== */
+.decision-modal-overlay { position: fixed; inset: 0; background: var(--overlay-bg); z-index: 400; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
+.decision-modal { background: var(--bg-card); border: 1px solid var(--border-focus); border-radius: 10px; padding: 28px; width: 540px; max-width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 32px 80px rgba(0,0,0,0.5); position: relative; }
+.decision-modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; font-family: var(--font); transition: all 0.15s; }
+.decision-modal-close:hover { background: var(--bg-elevated); color: var(--text); }
+
+/* ===== SWIMLANE ===== */
+.swimlane-wrap { width: 100%; overflow: auto; padding: 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); min-height: 400px; }
+.swimlane-row { display: flex; align-items: flex-start; border-bottom: 1px solid var(--border); }
+.swimlane-row:last-child { border-bottom: none; }
+.swimlane-label { width: 140px; min-width: 140px; padding: 16px 12px; font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.7px; border-right: 1px solid var(--border); display: flex; align-items: center; }
+.swimlane-lane { flex: 1; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px; min-height: 64px; align-items: center; }
+.swim-node { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: pointer; border: 1.5px solid transparent; transition: all 0.15s cubic-bezier(0.16,1,0.3,1); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swim-node:hover { filter: brightness(1.2); transform: translateY(-1px); box-shadow: 0 4px 12px var(--shadow); }
+.swim-node .node-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.swim-edge-supersedes { font-size: 10px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+.swim-edge-supersedes::before { content: '→'; }
+.swimlane-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
 
 /* ===== AUDIT ===== */
-.audit-entry { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px; min-height: var(--row-h); }
+.audit-entry { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; min-height: var(--row-h); }
 .audit-entry:last-child { border-bottom: none; }
 .audit-time { font-family: var(--mono); font-size: 11px; color: var(--text-dim); min-width: 150px; }
-.audit-type { font-weight: 600; min-width: 150px; }
+.audit-type { font-weight: 600; min-width: 150px; color: var(--text-muted); }
 
 /* ===== COMMAND PALETTE ===== */
-.cmd-overlay { position: fixed; inset: 0; background: var(--overlay-bg); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 18vh; backdrop-filter: blur(2px); }
+.cmd-overlay { position: fixed; inset: 0; background: var(--overlay-bg); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 18vh; backdrop-filter: blur(6px); }
 .cmd-overlay.open { display: flex; }
-.cmd-box { width: 560px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px var(--shadow); }
-.cmd-input { width: 100%; padding: 14px 16px; background: transparent; border: none; color: var(--text); font-size: 15px; font-family: var(--font); outline: none; border-bottom: 1px solid var(--border); }
+.cmd-box { width: 580px; background: var(--bg-card); border: 1px solid var(--border-focus); border-radius: var(--radius); overflow: hidden; box-shadow: 0 24px 80px rgba(0,0,0,0.6); }
+.cmd-input { width: 100%; padding: 16px 18px; background: transparent; border: none; color: var(--text); font-size: 15px; font-family: var(--font); outline: none; border-bottom: 1px solid var(--border); }
 .cmd-input::placeholder { color: var(--text-dim); }
-.cmd-hint { padding: 6px 16px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
-.cmd-hint kbd { background: var(--bg-surface); border: 1px solid var(--border); padding: 0 3px; border-radius: 2px; font-family: var(--mono); font-size: 10px; margin: 0 2px; }
-.cmd-results { max-height: 340px; overflow-y: auto; }
-.cmd-item { padding: 10px 16px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; transition: background 0.08s; }
-.cmd-item:hover, .cmd-item.selected { background: var(--indigo-dim); }
-.cmd-item .cmd-label { display: flex; align-items: center; gap: 8px; }
+.cmd-hint { padding: 6px 18px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); }
+.cmd-hint kbd { background: var(--bg-surface); border: 1px solid var(--border-focus); padding: 1px 4px; border-radius: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-muted); margin: 0 2px; }
+.cmd-results { max-height: 360px; overflow-y: auto; }
+.cmd-item { padding: 10px 18px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; align-items: center; transition: background 0.1s; color: var(--text-muted); }
+.cmd-item:hover, .cmd-item.selected { background: var(--indigo-dim); color: var(--text); }
+.cmd-item .cmd-label { display: flex; align-items: center; gap: 10px; }
 .cmd-shortcut { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
-.cmd-icon { font-size: 14px; width: 20px; text-align: center; }
+.cmd-icon { font-size: 14px; width: 20px; text-align: center; opacity: 0.7; }
 
 /* ===== ASSUMPTION CARDS ===== */
-.assumption-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); margin-bottom: var(--space-3); }
+.assumption-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); margin-bottom: var(--space-3); transition: border-color 0.15s; }
+.assumption-card:hover { border-color: var(--border-focus); }
 .assumption-card .header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.assumption-card .question-box { margin: 8px 0; padding: 10px; background: var(--bg); border-left: 3px solid var(--indigo); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-.assumption-card .option { padding: 4px 8px; margin: 3px 0; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; transition: background 0.1s; }
-.assumption-card .option:hover { background: var(--bg-surface); }
-.assumption-card .option.selected { background: var(--green); color: #000; font-weight: 600; }
-.assumption-card .evidence { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 8px; border-radius: var(--radius-sm); overflow-x: auto; margin-top: 6px; }
+.assumption-card .question-box { margin: 8px 0; padding: 12px; background: var(--bg); border-left: 3px solid var(--indigo); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.assumption-card .option { padding: 6px 10px; margin: 3px 0; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; transition: background 0.1s; color: var(--text-muted); }
+.assumption-card .option:hover { background: var(--bg-surface); color: var(--text); }
+.assumption-card .option.selected { background: rgba(16,185,129,0.15); color: var(--green); font-weight: 600; }
+.assumption-card .evidence { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 10px; border-radius: var(--radius-sm); overflow-x: auto; margin-top: 6px; border: 1px solid var(--border); color: var(--text-muted); }
 
 /* ===== SECTION HEADINGS ===== */
-.page-title { font-size: 18px; font-weight: 700; margin-bottom: var(--space-6); }
-.section-title { font-size: 14px; font-weight: 600; margin-bottom: var(--space-3); color: var(--text-muted); }
+.page-title { font-size: var(--text-xl); font-weight: 700; margin-bottom: var(--space-6); color: var(--text); letter-spacing: -0.3px; }
+.section-title { font-size: var(--text-xs); font-weight: 700; margin-bottom: var(--space-3); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
 
 /* ===== PROGRESS BAR ===== */
-.progress-bar { height: 8px; background: var(--bg-surface); border-radius: 4px; overflow: hidden; margin-bottom: var(--space-4); }
-.progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
-.progress-fill.green { background: var(--green); }
+.progress-bar { height: 6px; background: var(--bg-elevated); border-radius: 3px; overflow: hidden; margin-bottom: var(--space-4); }
+.progress-fill { height: 100%; border-radius: 3px; transition: width 0.4s cubic-bezier(0.16,1,0.3,1); }
+.progress-fill.green { background: var(--green); box-shadow: 0 0 8px rgba(16,185,129,0.4); }
 .progress-fill.amber { background: var(--amber); }
-.progress-fill.red { background: var(--red); }
+.progress-fill.red   { background: var(--red); }
 
 /* ===== COMPLIANCE FRAMEWORK CARDS ===== */
-.fw-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); cursor: pointer; transition: border-color 0.15s; }
-.fw-card:hover { border-color: var(--indigo); }
-.fw-card.alert { border-color: var(--red); }
-.fw-card .fw-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.fw-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); cursor: pointer; transition: border-color 0.15s; position: relative; overflow: hidden; }
+.fw-card:hover { border-color: var(--border-focus); }
+.fw-card.alert { border-color: rgba(239,68,68,0.5); }
+.fw-card .fw-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
 .fw-card .fw-status { font-size: 12px; }
+.fw-coming-overlay { position: absolute; inset: 0; background: rgba(248,249,250,0.85); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 2; border-radius: var(--radius); }
+body.dark .fw-coming-overlay { background: rgba(22,24,29,0.88); }
+.fw-coming-pill { font-size: 10px; font-weight: 700; background: var(--bg-elevated); color: var(--text-dim); padding: 3px 10px; border-radius: 10px; border: 1px solid var(--border); letter-spacing: 0.5px; }
 
 /* ===== AGENT CARDS ===== */
-.agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); }
-.agent-card .agent-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
-.agent-card .agent-role { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
-.drift-gauge { height: 6px; background: var(--bg-surface); border-radius: 3px; margin: 8px 0; position: relative; overflow: hidden; }
-.drift-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
-.permission-chip { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; margin: 2px; }
-.permission-chip.allow { background: rgba(52,211,153,0.15); color: var(--green); }
-.permission-chip.block { background: rgba(248,113,113,0.15); color: var(--red); }
+.agent-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-4); transition: border-color 0.15s; }
+.agent-card:hover { border-color: var(--border-focus); }
+.agent-card .agent-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+.agent-card .agent-role { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.drift-gauge { height: 4px; background: var(--bg-elevated); border-radius: 2px; margin: 10px 0; position: relative; overflow: hidden; }
+.drift-fill { height: 100%; border-radius: 2px; transition: width 0.4s cubic-bezier(0.16,1,0.3,1); }
+.permission-chip { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; margin: 2px; }
+.permission-chip.allow { background: rgba(16,185,129,0.12); color: var(--green); }
+.permission-chip.block { background: rgba(239,68,68,0.12); color: var(--red); }
 
-/* ===== RESPONSIVE — MOBILE TRIAGE ONLY ===== */
+/* ===== SPARKLINES ===== */
+.sparkline-path { fill: none; stroke-width: 1.5; }
+.area-critical { fill: url(#grad-critical); }
+.area-blue { fill: url(#grad-blue); }
+.area-amber { fill: url(#grad-amber); }
+
+/* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
   .sidebar { width: 56px; }
   .sidebar-logo .sub, .nav-item span:not(.icon), .nav-item .badge, .sidebar-footer { display: none; }
@@ -291,7 +470,6 @@ tr { height: var(--row-h); }
   .lattice-feed { width: 100%; height: 50%; }
   .lattice-detail { width: 100%; height: 50%; }
   .workspace-with-sidebar .internal-sidebar { display: none; }
-  /* Hide non-essential workspaces */
   [data-page="lattice"], [data-page="axiom"], [data-page="alignment"] { display: none !important; }
 }
 
@@ -300,12 +478,29 @@ tr { height: var(--row-h); }
 .density-toggle input { accent-color: var(--indigo); }
 
 /* ===== THEME TOGGLE ===== */
-.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--text-muted); transition: all 0.15s; flex-shrink: 0; line-height: 1; padding: 0; }
+.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); width: 28px; height: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--text-dim); transition: all 0.15s; flex-shrink: 0; line-height: 1; padding: 0; }
 .theme-toggle:hover { border-color: var(--indigo); color: var(--indigo); }
 </style>
 </head>
 <body class="light">
-<script>/* Apply saved theme before paint */(function(){var t=localStorage.getItem('vt-theme');if(t==='dark'||t==='light'){document.body.classList.remove('light','dark');document.body.classList.add(t);}})();</script>
+<script>/* Apply saved theme before paint */(function(){var t=localStorage.getItem('vt-theme');if(t==='dark'||t==='light'){document.body.classList.remove('light','dark');document.body.classList.add(t);}else{document.body.classList.add('light');}})();</script>
+<!-- SVG gradient defs for sparklines — zero-size, hidden -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="grad-blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c3aed" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#7c3aed" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="grad-amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="grad-critical" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+</svg>
 <div class="app">
   <!-- PRIMARY SIDEBAR — 5 workspaces -->
   <nav class="sidebar" id="primary-sidebar">
@@ -314,7 +509,7 @@ tr { height: var(--row-h); }
       <div class="nav-item active" data-page="home"><span class="icon">&#9632;</span> <span>Home</span></div>
       <div class="nav-item" data-page="lattice"><span class="icon">&#9670;</span> <span>Lattice</span></div>
       <div class="nav-item" data-page="axiom"><span class="icon">&#9830;</span> <span>Axiom</span></div>
-      <div class="nav-item" data-page="alignment"><span class="icon">&#9733;</span> <span>Alignment</span></div>
+      <div class="nav-item" data-page="alignment" style="display:none"><span class="icon">&#9733;</span> <span>Alignment</span></div>
       <div class="nav-item" data-page="governance"><span class="icon">&#9881;</span> <span>Governance</span></div>
     </div>
     <div class="sidebar-footer"><kbd>&#8984;K</kbd> Command Palette</div>
@@ -348,8 +543,19 @@ const DIM_COLORS = {
   deployment:'#818CF8', concurrency:'#a78bfa', logging:'#64748b', testing:'#22d3ee',
   error_handling:'#F87171', state_management:'#fb923c', messaging:'#38bdf8', security:'#f472b6'
 };
-const ACTION_ICONS = { llm_call:'&#9674;', mcp_tool:'&#9881;', shell_command:'&#9002;', git_operation:'&#8646;', file_read:'&#9744;' };
-const ACTION_CLASSES = { llm_call:'llm', mcp_tool:'tool', shell_command:'shell', git_operation:'git', file_read:'file' };
+/* ===== GRAPH-SPECIFIC COLORS (per spec) ===== */
+const GRAPH_DIM_COLORS = {
+  database:'#06b6d4', 'api-style':'#a855f7', api_style:'#a855f7', api:'#a855f7',
+  testing:'#22c55e', security:'#ec4899', auth:'#ec4899',
+  deployment:'#f97316', 'error-handling':'#eab308', error_handling:'#eab308', error:'#eab308',
+  caching:'#fb923c', concurrency:'#818CF8', logging:'#64748b',
+  messaging:'#f59e0b', 'state-management':'#38bdf8', state_management:'#38bdf8', other:'#818CF8',
+};
+let _cy = null;
+let _ledgerView = 'graph';
+let _graphData = null;
+const ACTION_ICONS = { llm_call:'&#9674;', mcp_tool:'&#9881;', shell_command:'&#9002;', git_operation:'&#8646;', file_read:'&#9744;', hook:'&#9889;', cli:'&#9654;' };
+const ACTION_CLASSES = { llm_call:'llm', mcp_tool:'tool', shell_command:'shell', git_operation:'git', file_read:'file', hook:'tool', cli:'shell' };
 
 /* ===== HELPERS ===== */
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
@@ -471,10 +677,13 @@ function renderContraCard(c) {
     </div>
     <div class="contra-rationale"><details><summary>View Rationale</summary><div class="text">${esc(c.reasoning)}</div></details></div>
     <div class="contra-footer">
-      <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_a_id}','Accept A')">Accept A</button>
+      ${c.status === 'deferred'
+        ? `<span class="badge" style="background:var(--amber,#f59e0b);color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:600">Deferred</span>`
+        : `<button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_a_id}','Accept A')">Accept A</button>
       <button class="btn primary" onclick="resolveContra('${c.id}','${c.decision_b_id}','Accept B')">Accept B</button>
       <button class="btn" onclick="resolveContra('${c.id}','both','Both Stay')">Both Stay</button>
-      <button class="btn danger" onclick="resolveContra('${c.id}','exception','Create Exception')">Create Exception</button>
+      <button class="btn" onclick="deferContra('${c.id}')">Defer</button>
+      <button class="btn danger" onclick="resolveContra('${c.id}','exception','Create Exception')">Create Exception</button>`}
     </div>
   </div>`;
 }
@@ -502,7 +711,37 @@ async function resolveContra(id, winnerId, rationale) {
       body: JSON.stringify({ winner_id: winnerId, rationale })
     });
     loadWorkspace(currentWorkspace);
+    // Refresh nav badge so resolved contradictions are no longer counted (Bug 6 fix)
+    updateBadges();
   } catch(e) { alert('Failed: ' + e.message); }
+}
+
+async function deferContra(id) {
+  try {
+    await fetch(API + '/api/contradictions/' + id + '/defer', { method: 'POST' });
+    loadWorkspace(currentWorkspace);
+    updateBadges();
+  } catch(e) { alert('Failed: ' + e.message); }
+}
+
+// Bug 6 fix: always remove old badge and re-render with current unresolved count.
+async function updateBadges() {
+  try {
+    const data = await fetch(API + '/api/contradictions?status=unresolved').then(r => r.json());
+    const axiomNav = document.querySelector('[data-page="axiom"]');
+    if (!axiomNav) return;
+    // Remove any existing badge (stale count)
+    const existing = axiomNav.querySelector('.nav-badge');
+    if (existing) existing.remove();
+    // Add fresh badge only when there are unresolved contradictions
+    if (data.total > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'nav-badge';
+      badge.style.cssText = 'margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:1px 6px;border-radius:10px;min-width:18px;text-align:center';
+      badge.textContent = data.total;
+      axiomNav.appendChild(badge);
+    }
+  } catch {}
 }
 
 /* ===================================================================
@@ -516,6 +755,7 @@ async function loadLattice(el) {
         <select class="filter-select" id="lf-action" onchange="applyLatticeFilters()">
           <option value="">All</option><option value="llm_call">LLM Call</option><option value="mcp_tool">MCP Tool</option>
           <option value="shell_command">Shell</option><option value="git_operation">Git</option><option value="file_read">File Read</option>
+          <option value="hook">Hook</option><option value="cli">CLI</option>
         </select></div>
       <div class="filter-group"><div class="filter-label">Agent</div>
         <select class="filter-select" id="lf-agent" onchange="applyLatticeFilters()"><option value="">All</option></select></div>
@@ -527,7 +767,10 @@ async function loadLattice(el) {
         <input class="filter-input" id="lf-search" placeholder="trace id, model..." oninput="applyLatticeFilters()"></div>
       <div class="density-toggle" style="margin-top:12px"><input type="checkbox" id="density-toggle" onchange="document.body.classList.toggle('high-density',this.checked)"> <span>High Density</span></div>
     </div>
-    <div class="lattice-feed" id="lattice-feed"><div style="padding:20px;color:var(--text-dim)">Loading traces...</div></div>
+    <div class="lattice-feed" id="lattice-feed-wrapper" style="display:flex;flex-direction:column;flex:0 0 40%;border-right:1px solid var(--border);overflow:hidden;">
+      <div class="feed-header"><span class="heartbeat-dot"></span>Live Events</div>
+      <div id="lattice-feed" style="flex:1;overflow-y:auto"><div style="padding:20px;color:var(--text-dim)">Loading traces...</div></div>
+    </div>
     <div class="lattice-detail" id="lattice-detail"><div class="lattice-detail-empty">Select a trace to view details</div></div>
   </div>`;
   try {
@@ -538,8 +781,38 @@ async function loadLattice(el) {
     (data.entries || data.spans || []).forEach(e => { if (e.agent_id) agents.add(e.agent_id); });
     const agentSel = document.getElementById('lf-agent');
     agents.forEach(a => { const o = document.createElement('option'); o.value = a; o.text = a; agentSel.add(o); });
+    renderLatticeSummary(data.summary || {});
     renderLatticeFeed(data.entries || data.spans || []);
+    // Poll every 2 seconds for live updates
+    if (window._latticePoller) clearInterval(window._latticePoller);
+    window._latticePoller = setInterval(async () => {
+      try {
+        const fresh = await fetch(API + '/api/traces?limit=200').then(r => r.json());
+        window._latticeData = fresh;
+        renderLatticeSummary(fresh.summary || {});
+        applyLatticeFilters();
+      } catch(_) {}
+    }, 2000);
   } catch(e) { document.getElementById('lattice-feed').innerHTML = `<div style="padding:20px;color:var(--red)">Failed: ${esc(e.message)}</div>`; }
+}
+
+function renderLatticeSummary(s) {
+  const el = document.getElementById('lattice-filters');
+  if (!el) return;
+  let existing = document.getElementById('lattice-summary');
+  const html = `<div id="lattice-summary" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+    <div style="font-weight:700;font-size:12px;margin-bottom:8px">Session Summary</div>
+    <div style="font-size:11px;color:var(--text-muted);line-height:1.8">
+      <div>Total events: <b style="color:var(--text)">${s.total_activities || 0}</b></div>
+      <div>Total tokens: <b style="color:var(--text)">${(s.total_tokens_in || 0) + (s.total_tokens_out || 0)}</b></div>
+      <div>Est. cost: <b style="color:var(--text)">$${(s.total_cost_usd || 0).toFixed(4)}</b></div>
+      <div>LLM calls: <b style="color:var(--text)">${(s.action_counts || {}).llm_call || 0}</b></div>
+      <div>Hook events: <b style="color:var(--text)">${(s.action_counts || {}).hook || 0}</b></div>
+      <div>CLI events: <b style="color:var(--text)">${(s.action_counts || {}).cli || 0}</b></div>
+      <div>Avg latency: <b style="color:var(--text)">${s.avg_latency_ms ? s.avg_latency_ms + 'ms' : 'N/A'}</b></div>
+    </div>
+  </div>`;
+  if (existing) { existing.outerHTML = html; } else { el.insertAdjacentHTML('beforeend', html); }
 }
 
 function applyLatticeFilters() {
@@ -559,17 +832,26 @@ function applyLatticeFilters() {
 function renderLatticeFeed(entries) {
   const feed = document.getElementById('lattice-feed');
   if (!entries.length) { feed.innerHTML = '<div style="padding:20px;color:var(--text-dim)">No traces match filters.</div>'; return; }
-  feed.innerHTML = entries.map(e => {
+  // Store entries by index so onclick can look them up without embedding JSON in HTML
+  window._latticeEntries = entries.slice();
+  feed.innerHTML = entries.map((e, idx) => {
     const type = e.action_type || 'llm_call';
     const icon = ACTION_ICONS[type] || '&#9679;';
     const cls = ACTION_CLASSES[type] || 'file';
     const title = e.summary || e.tool_name || e.model || type;
     const isActive = selectedTraceId === (e.entry_id || e.span_id) ? ' active' : '';
-    return `<div class="feed-row${isActive}" onclick="selectTrace(this, ${esc("'" + JSON.stringify(e).replace(/'/g, "\\'") + "'")})" data-id="${e.entry_id || e.span_id}">
+    // For hook/cli events, show pass/block badge
+    const d = e.details || {};
+    let resultBadge = '';
+    if ((type === 'hook' || type === 'cli') && d.result) {
+      const color = d.result === 'block' ? 'var(--red)' : 'var(--green)';
+      resultBadge = `<span class="permission-chip" style="background:${d.result === 'block' ? 'rgba(248,113,113,0.15)' : 'rgba(52,211,153,0.15)'};color:${color}">${d.result}</span>`;
+    }
+    return `<div class="feed-row${isActive}" onclick="selectTraceByIdx(this,${idx})" data-id="${esc(e.entry_id || e.span_id || '')}">
       <div class="feed-icon ${cls}">${icon}</div>
       <div class="feed-body">
-        <div class="feed-title">${esc(title)}</div>
-        <div class="feed-meta">${esc(e.agent_id || '')} ${e.duration_ms ? '&middot; ' + e.duration_ms + 'ms' : ''}</div>
+        <div class="feed-title">${esc(title)} ${resultBadge}</div>
+        <div class="feed-meta">${esc(e.agent_id || '')} ${d.file ? '&middot; ' + esc(d.file) : ''} ${e.duration_ms ? '&middot; ' + e.duration_ms + 'ms' : ''}</div>
       </div>
       <span class="feed-severity ${e.severity || 'info'}">${e.severity || 'info'}</span>
       <span class="feed-time">${fmtTime(e.timestamp)}</span>
@@ -577,11 +859,11 @@ function renderLatticeFeed(entries) {
   }).join('');
 }
 
-function selectTrace(rowEl, jsonStr) {
+function selectTraceByIdx(rowEl, idx) {
   document.querySelectorAll('.feed-row.active').forEach(r => r.classList.remove('active'));
   rowEl.classList.add('active');
-  let entry;
-  try { entry = JSON.parse(jsonStr); } catch { return; }
+  const entry = (window._latticeEntries || [])[idx];
+  if (!entry) return;
   selectedTraceId = entry.entry_id || entry.span_id;
   renderTraceDetail(entry);
 }
@@ -602,14 +884,18 @@ function renderTraceDetail(e) {
         <div class="card"><div class="card-label">Duration</div><div style="font-family:var(--mono);font-size:12px">${e.duration_ms || 0}ms</div></div>
         ${details.model ? `<div class="card"><div class="card-label">Model</div><div style="font-family:var(--mono);font-size:12px">${esc(details.model)}</div></div>` : ''}
         ${details.provider ? `<div class="card"><div class="card-label">Provider</div><div style="font-family:var(--mono);font-size:12px">${esc(details.provider)}</div></div>` : ''}
-        ${details.tokens_in != null ? `<div class="card"><div class="card-label">Tokens In</div><div style="font-family:var(--mono);font-size:12px">${details.tokens_in}</div></div>` : ''}
-        ${details.tokens_out != null ? `<div class="card"><div class="card-label">Tokens Out</div><div style="font-family:var(--mono);font-size:12px">${details.tokens_out}</div></div>` : ''}
-        ${details.cost_usd != null ? `<div class="card"><div class="card-label">Cost</div><div style="font-family:var(--mono);font-size:12px">$${details.cost_usd.toFixed(4)}</div></div>` : ''}
+        ${(details.input_tokens ?? details.tokens_in) != null ? `<div class="card"><div class="card-label">Tokens In</div><div style="font-family:var(--mono);font-size:12px">${details.input_tokens ?? details.tokens_in}</div></div>` : ''}
+        ${(details.output_tokens ?? details.tokens_out) != null ? `<div class="card"><div class="card-label">Tokens Out</div><div style="font-family:var(--mono);font-size:12px">${details.output_tokens ?? details.tokens_out}</div></div>` : ''}
+        ${details.cost_usd != null ? `<div class="card"><div class="card-label">Cost</div><div style="font-family:var(--mono);font-size:12px">$${Number(details.cost_usd).toFixed(4)}</div></div>` : ''}
+        ${details.action ? `<div class="card"><div class="card-label">Action</div><div style="font-family:var(--mono);font-size:12px">${esc(details.action)}</div></div>` : ''}
+        ${details.result ? `<div class="card"><div class="card-label">Result</div><div style="font-family:var(--mono);font-size:12px;color:${details.result==='block'?'var(--red)':'var(--green)'}">${esc(details.result)}</div></div>` : ''}
       </div>
       <div class="section-title">Timestamp</div>
       <div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${e.timestamp || ''}</div>
+      ${(details.file || details.file_path) ? `<div class="section-title">File</div><div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${esc(details.file || details.file_path)}</div>` : ''}
+      ${details.reason ? `<div class="section-title">Reason</div><div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${esc(details.reason)}</div>` : ''}
+      ${details.prompt_preview ? `<div class="section-title">Prompt Preview</div><pre style="font-family:var(--mono);font-size:11px;background:var(--bg);padding:8px;border-radius:4px;margin-bottom:12px;overflow-x:auto;white-space:pre-wrap">${esc(details.prompt_preview)}</pre>` : ''}
       ${details.command ? `<div class="section-title">Command</div><pre style="font-family:var(--mono);font-size:11px;background:var(--bg);padding:8px;border-radius:4px;margin-bottom:12px;overflow-x:auto">${esc(details.command)}</pre>` : ''}
-      ${details.file_path ? `<div class="section-title">File</div><div style="font-family:var(--mono);font-size:12px;color:var(--text-muted);margin-bottom:12px">${esc(details.file_path)}</div>` : ''}
       <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">ID: ${esc(e.entry_id || e.span_id || '')}</div>
     </div>
     <div id="prov-tab" class="detail-body" style="display:none">
@@ -654,54 +940,346 @@ async function loadAxiomContradictions() {
   const el = document.getElementById('axiom-content');
   el.innerHTML = '<div style="color:var(--text-dim)">Loading...</div>';
   try {
-    const data = await fetch(API + '/api/contradictions').then(r => r.json());
-    if (!data.contradictions.length) {
+    const [unresolvedData, deferredData] = await Promise.all([
+      fetch(API + '/api/contradictions').then(r => r.json()),
+      fetch(API + '/api/contradictions?status=deferred').then(r => r.json()),
+    ]);
+    const all = [...unresolvedData.contradictions, ...deferredData.contradictions];
+    if (!all.length) {
       el.innerHTML = '<div class="card" style="text-align:center;padding:24px"><span class="badge success">Clean</span> No unresolved contradictions.</div>';
       return;
     }
-    el.innerHTML = data.contradictions.map(c => renderContraCard(c)).join('');
+    el.innerHTML = all.map(c => renderContraCard(c)).join('');
   } catch(e) { el.innerHTML = `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
 }
 
 async function loadAxiomLedger() {
   const el = document.getElementById('axiom-content');
-  el.innerHTML = '<div class="section-title">Decision Timeline</div><div class="graph-container" id="ledger-graph"></div>';
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="section-title" style="margin:0">Decision Knowledge Graph</div>
+      <div style="display:flex;gap:8px">
+        <button id="view-graph-btn" class="btn-view active" onclick="switchLedgerView('graph')">&#9671; Graph</button>
+        <button id="view-swim-btn" class="btn-view" onclick="switchLedgerView('swimlane')">&#9776; Swimlane</button>
+      </div>
+    </div>
+    <div id="ledger-wrapper" style="position:relative"></div>
+  `;
   try {
     const data = await fetch(API + '/api/graph').then(r => r.json());
     if (!data.nodes.length) {
-      el.innerHTML = '<div class="card" style="text-align:center;padding:24px;color:var(--text-dim)">No decisions recorded yet.</div>';
+      document.getElementById('ledger-wrapper').innerHTML =
+        '<div class="card" style="text-align:center;padding:32px;color:var(--text-dim)">No decisions recorded yet.</div>';
       return;
     }
-    // Swimlane-style: group nodes by agent, plot on time axis
-    const elements = [];
-    data.nodes.forEach(n => {
-      const dim = (n.data.dimensions || [])[0] || 'database';
-      elements.push({ data: { ...n.data, color: DIM_COLORS[dim] || '#818CF8' } });
-    });
-    data.edges.forEach(e => {
-      const color = e.data.type === 'CONTRADICTION' ? '#F87171' : e.data.type === 'TENSION' ? '#FBBF24' : e.data.type === 'SUPERSEDES' ? '#8888a0' : '#1F1F2E';
-      const style = e.data.type === 'SHARED_DIMENSION' ? 'dotted' : 'solid';
-      elements.push({ data: { ...e.data, color, lineStyle: style } });
-    });
-    const cy = cytoscape({
-      container: document.getElementById('ledger-graph'), elements,
-      style: [
-        { selector: 'node', style: { 'background-color': 'data(color)', 'label': 'data(label)', 'font-size': '10px', 'color': getComputedStyle(document.body).getPropertyValue('--text').trim(), 'text-outline-color': getComputedStyle(document.body).getPropertyValue('--bg').trim(), 'text-outline-width': 2, 'width': 28, 'height': 28, 'font-family': 'Inter, sans-serif' } },
-        { selector: 'edge', style: { 'line-color': 'data(color)', 'width': 1.5, 'curve-style': 'bezier', 'target-arrow-shape': 'triangle', 'target-arrow-color': 'data(color)', 'arrow-scale': 0.7 } },
-        { selector: 'edge[type="SHARED_DIMENSION"]', style: { 'target-arrow-shape': 'none', 'line-style': 'dotted', 'width': 1, 'opacity': 0.3 } }
-      ],
-      layout: { name: 'cose', animate: false, nodeDimensionsIncludeLabels: true, idealEdgeLength: 120 }
-    });
-    cy.on('tap', 'node', e => showDecisionModal(e.target.data('id')));
+    _graphData = data;
+    renderCytoscape(data);
   } catch(e) { el.innerHTML = `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+}
+
+function switchLedgerView(view) {
+  _ledgerView = view;
+  document.getElementById('view-graph-btn').classList.toggle('active', view === 'graph');
+  document.getElementById('view-swim-btn').classList.toggle('active', view === 'swimlane');
+  if (view === 'graph') {
+    renderCytoscape(_graphData);
+  } else {
+    if (_cy) { _cy.destroy(); _cy = null; }
+    renderSwimlane(_graphData);
+  }
+}
+
+function renderCytoscape(data) {
+  if (_cy) { _cy.destroy(); _cy = null; }
+  const wrapper = document.getElementById('ledger-wrapper');
+  wrapper.innerHTML = `
+    <div id="cy"></div>
+    <div id="cy-tooltip" style="position:fixed;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--text);max-width:300px;pointer-events:none;z-index:9999;display:none;box-shadow:0 8px 32px rgba(0,0,0,0.18)"></div>
+    <div id="cy-legend" style="position:absolute;bottom:16px;left:16px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:11px;color:var(--text-muted);max-width:160px;z-index:10"></div>
+    <div style="position:absolute;bottom:16px;right:16px;font-size:11px;color:var(--text-dim);z-index:10">Scroll to zoom · Drag to pan · Click node for details</div>
+  `;
+
+  // Register fcose layout if available and not yet registered
+  try { if (typeof cytoscapeFcose !== 'undefined') cytoscape.use(cytoscapeFcose); } catch {}
+
+  // Maps
+  const supersededBy = {};
+  data.edges.forEach(e => {
+    if (e.data.type === 'SUPERSEDES') supersededBy[e.data.target] = e.data.source;
+  });
+
+  const elements = [];
+  data.nodes.forEach(n => {
+    const dim = (n.data.dimensions || [])[0] || 'other';
+    const color = GRAPH_DIM_COLORS[dim] || '#818CF8';
+    const isSuperseded = !!supersededBy[n.data.id];
+    const rawLabel = n.data.label || n.data.title || n.data.id || '';
+    // Word-wrap label: max 18 chars per line
+    const words = rawLabel.split(' ');
+    let lines = [], line = '';
+    words.forEach(w => {
+      if ((line + ' ' + w).trim().length > 18 && line) { lines.push(line); line = w; }
+      else { line = (line + ' ' + w).trim(); }
+    });
+    if (line) lines.push(line);
+    const label = lines.slice(0, 3).join('\n') + (lines.length > 3 ? '…' : '');
+    elements.push({ group: 'nodes', data: {
+      id: n.data.id, label, fullLabel: rawLabel, dim, color, isSuperseded,
+      confidence: n.data.confidence || 0,
+      content: n.data.content || '',
+      decision_type: n.data.decision_type || '',
+      dimensions: (n.data.dimensions || []).join(', '),
+    }});
+  });
+
+  data.edges.forEach(e => {
+    // Only add edge if both nodes exist
+    const src = data.nodes.find(n => n.data.id === e.data.source);
+    const tgt = data.nodes.find(n => n.data.id === e.data.target);
+    if (!src || !tgt) return;
+    elements.push({ group: 'edges', data: {
+      id: e.data.id || `${e.data.source}__${e.data.target}__${e.data.type}`,
+      source: e.data.source, target: e.data.target, type: e.data.type,
+    }});
+  });
+
+  _cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements,
+    style: [
+      // --- Node base ---
+      { selector: 'node', style: {
+        shape: 'ellipse',
+        width: 88, height: 88,
+        'background-color': '#2a2d35',
+        'background-opacity': 1,
+        'border-width': 3,
+        'border-color': 'data(color)',
+        'border-opacity': 1,
+        label: 'data(label)',
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'font-size': '10px',
+        'font-family': 'Geist, system-ui, sans-serif',
+        'font-weight': '600',
+        color: '#f8fafe',
+        'text-wrap': 'wrap',
+        'text-max-width': '76px',
+        'text-outline-width': 0,
+        'z-index': 10,
+        'transition-property': 'border-width, border-color, background-color',
+        'transition-duration': '0.15s',
+      }},
+      // --- Superseded node — faded to 30% ---
+      { selector: 'node[?isSuperseded]', style: {
+        'background-color': '#1e2028',
+        'background-opacity': 0.5,
+        'border-opacity': 0.3,
+        'color': 'rgba(248,250,254,0.3)',
+      }},
+      // --- Hover ---
+      { selector: 'node:active', style: {
+        'border-width': 4,
+        'border-color': '#ffffff',
+        'background-opacity': 1,
+        'z-index': 999,
+      }},
+      // --- SUPERSEDES edge: thick red with arrow ---
+      { selector: 'edge[type="SUPERSEDES"]', style: {
+        width: 3,
+        'line-color': '#ef4444',
+        'target-arrow-color': '#ef4444',
+        'target-arrow-shape': 'triangle',
+        'curve-style': 'bezier',
+        'arrow-scale': 1.5,
+        opacity: 0.9,
+        'z-index': 5,
+      }},
+      // --- CONTRADICTION edge: thick red dashed (pulsing via CSS) ---
+      { selector: 'edge[type="CONTRADICTION"]', style: {
+        width: 3,
+        'line-color': '#ef4444',
+        'line-style': 'dashed',
+        'line-dash-pattern': [8, 4],
+        'target-arrow-shape': 'none',
+        'curve-style': 'bezier',
+        opacity: 1,
+        'z-index': 5,
+      }},
+      // --- SHARED_DIMENSION: thin gray dashed ---
+      { selector: 'edge[type="SHARED_DIMENSION"]', style: {
+        width: 1.5,
+        'line-color': '#6b7280',
+        'line-style': 'dashed',
+        'line-dash-pattern': [4, 4],
+        'target-arrow-shape': 'none',
+        'curve-style': 'bezier',
+        opacity: 0.45,
+      }},
+      // --- TENSION: amber dashed ---
+      { selector: 'edge[type="TENSION"]', style: {
+        width: 2,
+        'line-color': '#f59e0b',
+        'line-style': 'dashed',
+        'target-arrow-shape': 'none',
+        'curve-style': 'bezier',
+        opacity: 0.7,
+      }},
+      // --- default edge ---
+      { selector: 'edge', style: {
+        width: 1,
+        'line-color': '#4b5563',
+        'curve-style': 'bezier',
+        opacity: 0.3,
+      }},
+    ],
+    layout: (() => {
+      if (typeof cytoscapeFcose !== 'undefined') {
+        return { name: 'fcose', quality: 'proof', nodeRepulsion: 4500, idealEdgeLength: 100, animate: true, animationDuration: 1000, padding: 48, randomize: false };
+      }
+      return { name: 'cose', animate: true, animationDuration: 600, nodeRepulsion: 10000, idealEdgeLength: 130, gravity: 0.2, numIter: 600, padding: 48 };
+    })(),
+    wheelSensitivity: 0.25,
+    minZoom: 0.2,
+    maxZoom: 3,
+  });
+
+  // Tooltip
+  const tooltip = document.getElementById('cy-tooltip');
+  _cy.on('mouseover', 'node', evt => {
+    const n = evt.target.data();
+    const pct = n.confidence ? Math.round(n.confidence * 100) + '%' : '—';
+    tooltip.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="width:12px;height:12px;border-radius:50%;background:${esc(n.color)};flex-shrink:0"></span>
+        <span style="font-weight:700;font-size:13px;color:var(--text)">${esc(n.fullLabel)}</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <span style="background:${esc(n.color)}22;color:${esc(n.color)};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">${esc(n.dim)}</span>
+        ${n.decision_type ? `<span style="background:var(--bg-surface);color:var(--text-muted);padding:2px 8px;border-radius:10px;font-size:10px">${esc(n.decision_type)}</span>` : ''}
+        <span style="background:var(--bg-surface);color:var(--text-muted);padding:2px 8px;border-radius:10px;font-size:10px">confidence ${pct}</span>
+      </div>
+      ${n.isSuperseded ? '<div style="color:#ef4444;font-size:11px;margin-bottom:4px">⊘ Superseded</div>' : ''}
+      ${n.content ? `<div style="color:var(--text-muted);font-size:11px;border-top:1px solid var(--border);padding-top:8px;line-height:1.5">${esc(n.content.slice(0, 140))}${n.content.length > 140 ? '…' : ''}</div>` : ''}
+      <div style="margin-top:6px;color:var(--text-dim);font-size:10px">Click to view full details</div>
+    `;
+    tooltip.style.display = 'block';
+  });
+  _cy.on('mousemove', 'node', evt => {
+    const p = evt.originalEvent;
+    tooltip.style.left = (p.clientX + 18) + 'px';
+    tooltip.style.top  = Math.max(8, p.clientY - 20) + 'px';
+  });
+  _cy.on('mouseout', 'node', () => { tooltip.style.display = 'none'; });
+  _cy.on('tap', 'node', evt => { tooltip.style.display = 'none'; showDecisionModal(evt.target.data('id')); });
+  _cy.on('tap', function(evt) { if (evt.target === _cy) tooltip.style.display = 'none'; });
+
+  // Legend
+  const dims = [...new Set(data.nodes.map(n => (n.data.dimensions || [])[0] || 'other'))];
+  const edgeTypesPresent = [...new Set(data.edges.map(e => e.data.type))];
+  let leg = '<div style="font-weight:700;margin-bottom:8px;font-size:10px;text-transform:uppercase;letter-spacing:0.5px">Dimensions</div>';
+  dims.forEach(d => {
+    const c = GRAPH_DIM_COLORS[d] || '#818CF8';
+    leg += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="width:10px;height:10px;border-radius:50%;background:${c};flex-shrink:0"></span><span style="font-size:11px">${d.replace(/_/g,' ')}</span></div>`;
+  });
+  leg += '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Edges</div>';
+  const edgeMeta = {
+    SUPERSEDES: { color:'#ef4444', dash:false, label:'supersedes' },
+    CONTRADICTION: { color:'#ef4444', dash:true, label:'contradiction' },
+    TENSION: { color:'#f59e0b', dash:true, label:'tension' },
+    SHARED_DIMENSION: { color:'#6b7280', dash:true, label:'shared dim' },
+  };
+  edgeTypesPresent.forEach(t => {
+    const m = edgeMeta[t]; if (!m) return;
+    leg += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span style="width:20px;height:2px;background:${m.color};flex-shrink:0;${m.dash ? 'border-top:2px dashed '+m.color+';background:none' : ''}"></span>
+      <span style="font-size:11px">${m.label}</span>
+    </div>`;
+  });
+  leg += '<div style="margin-top:6px;display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:#818CF8;opacity:0.25;flex-shrink:0"></span><span style="font-size:11px;opacity:0.6">faded = superseded</span></div>';
+  document.getElementById('cy-legend').innerHTML = leg;
+}
+
+function renderSwimlane(data) {
+  const wrapper = document.getElementById('ledger-wrapper');
+  const nodeById = {};
+  data.nodes.forEach(n => { nodeById[n.data.id] = n.data; });
+  const supersedes = {};
+  const supersededBy = {};
+  data.edges.forEach(e => {
+    if (e.data.type === 'SUPERSEDES') {
+      if (!supersedes[e.data.source]) supersedes[e.data.source] = [];
+      supersedes[e.data.source].push(e.data.target);
+      supersededBy[e.data.target] = e.data.source;
+    }
+  });
+  const lanes = {};
+  data.nodes.forEach(n => {
+    const dim = (n.data.dimensions || [])[0] || 'other';
+    if (!lanes[dim]) lanes[dim] = [];
+    lanes[dim].push(n.data);
+  });
+  const dimOrder = ['database','api-style','api_style','testing','auth','security','caching','deployment',
+    'concurrency','logging','error-handling','error_handling','state-management','state_management','messaging','other'];
+  const orderedDims = [...new Set([...dimOrder.filter(d => lanes[d]), ...Object.keys(lanes)])];
+  let html = '<div class="swimlane-wrap">';
+  orderedDims.forEach(dim => {
+    if (!lanes[dim]) return;
+    const color = GRAPH_DIM_COLORS[dim] || '#818CF8';
+    const dimLabel = dim.replace(/_/g, ' ');
+    const ordered = [...lanes[dim]].sort((a, b) => (supersedes[b.id] ? 1 : 0) - (supersedes[a.id] ? 1 : 0));
+    let nodesHtml = '';
+    ordered.forEach(n => {
+      const isSuperseded = !!supersededBy[n.id];
+      const label = (n.label || n.title || n.id || '').slice(0, 36);
+      nodesHtml += `<span class="swim-node" onclick="showDecisionModal('${esc(n.id)}')"
+        style="background:${color}18;border-color:${color}66;color:var(--text);opacity:${isSuperseded ? '0.4' : '1'};${isSuperseded ? 'text-decoration:line-through' : ''}"
+        title="${esc(n.label || n.id)}">
+        <span class="node-dot" style="background:${color}"></span>${esc(label)}
+      </span>`;
+      if (supersedes[n.id]) {
+        supersedes[n.id].forEach(tid => {
+          const tgt = nodeById[tid];
+          if (tgt && (tgt.dimensions || [])[0] === dim) {
+            nodesHtml += `<span class="swim-edge-supersedes" title="supersedes ${esc(tgt.label || tid)}"></span>`;
+          }
+        });
+      }
+    });
+    html += `<div class="swimlane-row">
+      <div class="swimlane-label"><span style="color:${color}">${esc(dimLabel)}</span></div>
+      <div class="swimlane-lane">${nodesHtml}</div>
+    </div>`;
+  });
+  html += '</div>';
+  wrapper.innerHTML = html;
 }
 
 async function showDecisionModal(id) {
   try {
     const d = await fetch(API + '/api/decisions/' + id).then(r => r.json());
-    const det = document.getElementById('lattice-detail') || document.getElementById('axiom-content');
-    // Simple inline display — reuse available space
-    alert(`${d.title}\n\nType: ${d.decision_type}\nDimensions: ${d.dimensions.join(', ')}\nConfidence: ${Math.round(d.confidence*100)}%\n\n${d.content}`);
+    const color = GRAPH_DIM_COLORS[(d.dimensions || [])[0]] || '#818CF8';
+    const pct = d.confidence ? Math.round(d.confidence * 100) + '%' : '—';
+    const overlay = document.createElement('div');
+    overlay.className = 'decision-modal-overlay';
+    overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="decision-modal">
+        <button class="decision-modal-close" onclick="this.closest('.decision-modal-overlay').remove()">&#10005;</button>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+          <span style="width:14px;height:14px;border-radius:50%;background:${esc(color)};flex-shrink:0"></span>
+          <div style="font-size:16px;font-weight:700;color:var(--text);line-height:1.3;padding-right:32px">${esc(d.title || id)}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">
+          ${(d.dimensions || []).map(dim => `<span style="background:${GRAPH_DIM_COLORS[dim]||'#818CF8'}22;color:${GRAPH_DIM_COLORS[dim]||'#818CF8'};padding:3px 10px;border-radius:10px;font-size:11px;font-weight:600">${esc(dim)}</span>`).join('')}
+          ${d.decision_type ? `<span style="background:var(--bg-surface);color:var(--text-muted);padding:3px 10px;border-radius:10px;font-size:11px">${esc(d.decision_type)}</span>` : ''}
+          <span style="background:var(--bg-surface);color:var(--text-muted);padding:3px 10px;border-radius:10px;font-size:11px">confidence ${pct}</span>
+        </div>
+        ${d.content ? `<div style="color:var(--text-muted);font-size:13px;line-height:1.6;background:var(--bg-surface);border-radius:6px;padding:14px;border:1px solid var(--border)">${esc(d.content)}</div>` : ''}
+        ${d.rationale ? `<div style="margin-top:12px"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim);margin-bottom:6px">Rationale</div><div style="color:var(--text-muted);font-size:12px;line-height:1.6">${esc(d.rationale)}</div></div>` : ''}
+      </div>
+    `;
+    document.body.appendChild(overlay);
   } catch(e) { console.error(e); }
 }
 
@@ -799,16 +1377,16 @@ function loadAlignmentAnalytics() {
 async function loadGovernance(el) {
   el.innerHTML = `<div class="workspace-with-sidebar">
     <div class="internal-sidebar">
-      <div class="internal-nav active" data-gov="agents" onclick="switchGovTab(this,'agents')">Agents</div>
-      <div class="internal-nav" data-gov="assumptions" onclick="switchGovTab(this,'assumptions')">Assumptions</div>
-      <div class="internal-nav" data-gov="compliance" onclick="switchGovTab(this,'compliance')">Compliance</div>
+      <div class="internal-nav active" data-gov="assumptions" onclick="switchGovTab(this,'assumptions')">Assumptions</div>
       <div class="internal-nav" data-gov="audit" onclick="switchGovTab(this,'audit')">Audit Trail</div>
-      <div class="internal-nav" data-gov="settings" onclick="switchGovTab(this,'settings')">Settings</div>
+      <div class="internal-nav" data-gov="agents" onclick="switchGovTab(this,'agents')">Agents <span style="font-size:9px;font-weight:700;background:var(--indigo-dim);color:var(--indigo);padding:1px 5px;border-radius:8px;margin-left:4px;letter-spacing:0.2px">Soon</span></div>
+      <div class="internal-nav" data-gov="compliance" onclick="switchGovTab(this,'compliance')">Compliance <span style="font-size:9px;font-weight:700;background:var(--indigo-dim);color:var(--indigo);padding:1px 5px;border-radius:8px;margin-left:4px;letter-spacing:0.2px">Soon</span></div>
+      <div class="internal-nav" data-gov="settings" onclick="switchGovTab(this,'settings')">Settings <span style="font-size:9px;font-weight:700;background:var(--indigo-dim);color:var(--indigo);padding:1px 5px;border-radius:8px;margin-left:4px;letter-spacing:0.2px">Soon</span></div>
     </div>
     <div class="internal-content" id="gov-content"></div>
   </div>`;
-  currentGovTab = 'agents';
-  loadGovAgents();
+  currentGovTab = 'assumptions';
+  loadGovAssumptions();
 }
 
 function switchGovTab(navEl, tab) {
@@ -899,11 +1477,28 @@ function renderGovAssumptionList(assumptions) {
   assumptions.sort((a, b) => (sevOrder[a.severity] || 3) - (sevOrder[b.severity] || 3));
   el.innerHTML = assumptions.map(a => {
     const evidence = a.code_evidence && a.code_evidence.length ? a.code_evidence[0] : null;
+    const isResolved = a.status === 'validated' || a.status === 'rejected' || a.status === 'deferred';
+    // Label each option: A=validated, last=deferred if "context", rest=rejected
+    const optionLabels = (a.options || []).map((opt, i) => {
+      if (i === 0) return 'A';
+      const alpha = String.fromCharCode(65 + i); // B, C, D, E…
+      return alpha;
+    });
     const options = (a.options || []).map((opt, i) => {
       const sel = a.selected_option === i ? 'selected' : '';
-      return `<div class="option ${sel}" onclick="resolveAssumption('${a.id}', ${i})">${esc(opt)}</div>`;
+      const label = optionLabels[i];
+      const disabled = isResolved ? 'style="pointer-events:none;opacity:0.6"' : '';
+      return `<div class="option ${sel}" onclick="resolveAssumption('${a.id}', ${i})" ${disabled}><strong>${label}.</strong> ${esc(opt)}</div>`;
     }).join('');
-    return `<div class="assumption-card">
+    const resolvedNote = isResolved
+      ? `<div style="font-size:11px;margin-top:6px;color:${a.status==='validated'?'var(--green)':a.status==='rejected'?'var(--red)':'var(--amber)'}">
+           ${a.status === 'validated' ? '✓ Validated — architectural rule confirmed' :
+             a.status === 'rejected'  ? '✗ Rejected — assumption dismissed' :
+             '⏸ Deferred — will resurface in 7 days'}
+           ${a.resolved_by ? ` · by ${esc(a.resolved_by)}` : ''}
+         </div>`
+      : '';
+    return `<div class="assumption-card" id="assumption-${a.id}">
       <div class="header">
         ${statusBadge(a.status)} ${severityBadge(a.severity)}
         <span style="font-size:11px;color:var(--text-dim)">${esc(a.category)} / ${esc(a.pattern_id)}</span>
@@ -911,6 +1506,7 @@ function renderGovAssumptionList(assumptions) {
       </div>
       <div style="font-weight:600;margin-bottom:6px">${esc(a.summary)}</div>
       ${a.question ? `<div class="question-box"><div style="font-weight:600;margin-bottom:6px">${esc(a.question)}</div>${options}</div>` : ''}
+      ${resolvedNote}
       ${evidence ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(evidence.file)}:${evidence.line}</div>` : ''}
       ${evidence && evidence.snippet ? `<div class="evidence">${esc(evidence.snippet)}</div>` : ''}
       ${a.detected_by ? `<div style="font-size:10px;color:var(--text-dim);margin-top:4px">detected by ${esc(a.detected_by)}</div>` : ''}
@@ -919,13 +1515,26 @@ function renderGovAssumptionList(assumptions) {
 }
 
 async function resolveAssumption(id, optionIdx) {
+  // Optimistic UI: disable the card immediately
+  const card = document.getElementById('assumption-' + id);
+  if (card) card.style.opacity = '0.6';
   try {
-    await fetch(API + '/api/assumptions/' + id + '/resolve', {
+    const resp = await fetch(API + '/api/assumptions/' + id + '/resolve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ selected_option: optionIdx, resolved_by: 'dashboard-user', rationale: '' })
     });
-    filterGovAssumptions();
-  } catch(e) { console.error(e); }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      console.error('resolve failed:', err);
+      if (card) card.style.opacity = '';
+      return;
+    }
+    // Refresh the full list + stat cards to show updated counts
+    await filterGovAssumptions();
+  } catch(e) {
+    console.error(e);
+    if (card) card.style.opacity = '';
+  }
 }
 
 async function triggerAssumptionScan() {
@@ -936,22 +1545,53 @@ async function triggerAssumptionScan() {
 }
 
 /* --- Governance: Compliance --- */
+const COMPLIANCE_COMING_SOON = ['eu_ai_act', 'EU AI Act', 'soc2', 'SOC 2', 'hipaa', 'HIPAA', 'pci_dss', 'PCI DSS'];
+function isComingSoonFramework(name) {
+  return COMPLIANCE_COMING_SOON.some(s => name.toLowerCase().includes(s.toLowerCase()));
+}
 async function loadGovCompliance() {
   const el = document.getElementById('gov-content');
-  el.innerHTML = '<div class="page-title">Compliance</div><div id="compliance-frameworks" class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-bottom:24px"></div><div id="compliance-detail"></div><div style="text-align:right;margin-top:12px"><button class="btn primary" onclick="exportEvidence()">Export Evidence Bundle</button></div>';
+  el.innerHTML = `<div class="page-title">Compliance</div>
+    <div style="margin-bottom:16px;padding:12px 16px;background:var(--indigo-dim);border:1px solid var(--indigo-glow);border-radius:var(--radius);font-size:13px;color:var(--indigo)">
+      Full compliance reporting ships in <strong>v1.1</strong>. Audit trail data is live — export and verification coming soon.
+    </div>
+    <div id="compliance-frameworks" class="cards" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));margin-bottom:24px"></div>
+    <div id="compliance-detail"></div>
+    <div style="text-align:right;margin-top:12px">
+      <button class="btn" disabled style="opacity:0.4;cursor:not-allowed" title="Coming in v1.1">Export Evidence Bundle</button>
+    </div>`;
   try {
     const data = await fetch(API + '/api/compliance').then(r => r.json());
     const fw = document.getElementById('compliance-frameworks');
     (data.compliance_mappings || []).forEach(m => {
       const sCls = m.status === 'implemented' || m.status === 'partial' ? '' : 'alert';
-      fw.innerHTML += `<div class="fw-card ${sCls}"><div class="fw-name">${esc(m.framework)}</div><div class="fw-status">${statusBadge(m.status)}</div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(m.requirement)}</div></div>`;
+      const comingSoon = isComingSoonFramework(m.framework);
+      fw.innerHTML += `<div class="fw-card ${sCls}">
+        ${comingSoon ? `<div class="fw-coming-overlay"><span class="fw-coming-pill">Coming Soon</span></div>` : ''}
+        <div class="fw-name">${esc(m.framework)}</div>
+        <div class="fw-status">${statusBadge(m.status)}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(m.requirement)}</div>
+      </div>`;
     });
+    // If no mappings returned, show placeholder cards
+    if (!(data.compliance_mappings || []).length) {
+      ['EU AI Act', 'SOC 2', 'HIPAA'].forEach(name => {
+        fw.innerHTML += `<div class="fw-card">
+          <div class="fw-coming-overlay"><span class="fw-coming-pill">Coming Soon</span></div>
+          <div class="fw-name">${esc(name)}</div>
+          <div class="fw-status"><span class="badge neutral">planned</span></div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Full mapping in v1.1</div>
+        </div>`;
+      });
+    }
     const detail = document.getElementById('compliance-detail');
-    detail.innerHTML = `<div class="section-title">Attribution</div><div class="cards">
-      <div class="card"><div class="card-label">Agent Decisions</div><div class="card-value">${data.attribution.agent_decisions || 0}</div></div>
-      <div class="card"><div class="card-label">Human Decisions</div><div class="card-value">${data.attribution.human_decisions || 0}</div></div>
-      <div class="card"><div class="card-label">Total</div><div class="card-value">${data.attribution.total_decisions || 0}</div></div>
-    </div>`;
+    if (data.attribution) {
+      detail.innerHTML = `<div class="section-title">Attribution</div><div class="cards">
+        <div class="card"><div class="card-label">Agent Decisions</div><div class="card-value">${data.attribution.agent_decisions || 0}</div></div>
+        <div class="card"><div class="card-label">Human Decisions</div><div class="card-value">${data.attribution.human_decisions || 0}</div></div>
+        <div class="card"><div class="card-label">Total</div><div class="card-value">${data.attribution.total_decisions || 0}</div></div>
+      </div>`;
+    }
   } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
 }
 
@@ -965,43 +1605,171 @@ async function exportEvidence() {
 }
 
 /* --- Governance: Audit Trail --- */
+// ── Icons: diamond=decision, triangle=contradiction, bulb=assumption,
+//           shield=hook, terminal=cli/session, bubble=llm
+const AUDIT_TYPE_META = {
+  decision_added:           { color: 'var(--indigo)', icon: '◆' },
+  decision_superseded:      { color: 'var(--amber)',  icon: '◇' },
+  contradiction_detected:   { color: 'var(--red)',    icon: '⚠' },
+  contradiction_resolved:   { color: 'var(--green)',  icon: '✓' },
+  context_injection:        { color: 'var(--indigo)', icon: '💬' },
+  session_started:          { color: 'var(--cyan)',   icon: '▶' },
+  session_completed:        { color: 'var(--cyan)',   icon: '▶' },
+  assumption_detected:      { color: 'var(--amber)',  icon: '💡' },
+  assumption_validated:     { color: 'var(--green)',  icon: '💡' },
+  assumption_rejected:      { color: 'var(--red)',    icon: '💡' },
+  assumption_scan:          { color: 'var(--amber)',  icon: '💡' },
+  hook_edit:                { color: 'var(--text-dim)', icon: '🛡' },
+  hook_write:               { color: 'var(--text-dim)', icon: '🛡' },
+  hook_bash:                { color: 'var(--amber)',  icon: '🛡' },
+  hook_read:                { color: 'var(--text-dim)', icon: '🛡' },
+  llm_call:                 { color: 'var(--indigo)', icon: '💬' },
+};
+// Fallback by prefix
+function auditMeta(event_type) {
+  if (AUDIT_TYPE_META[event_type]) return AUDIT_TYPE_META[event_type];
+  if (event_type.startsWith('decision'))     return { color: 'var(--indigo)', icon: '◆' };
+  if (event_type.startsWith('contradiction'))return { color: 'var(--red)',    icon: '⚠' };
+  if (event_type.startsWith('assumption'))   return { color: 'var(--amber)',  icon: '💡' };
+  if (event_type.startsWith('hook'))         return { color: 'var(--text-dim)', icon: '🛡' };
+  if (event_type.startsWith('session'))      return { color: 'var(--cyan)',   icon: '▶' };
+  if (event_type === 'llm_call')             return { color: 'var(--indigo)', icon: '💬' };
+  return { color: 'var(--text-dim)', icon: '·' };
+}
+
+// Result badge map
+const AUDIT_RESULT_DESC = {
+  pass:    '<span class="badge success"    style="font-size:10px">pass</span>',
+  fail:    '<span class="badge critical"   style="font-size:10px">fail</span>',
+  warning: '<span class="badge warning"    style="font-size:10px">warn</span>',
+  info:    '<span class="badge neutral"    style="font-size:10px">info</span>',
+};
+
+// Source label
+const AUDIT_SOURCE_LABEL = {
+  decisions:      'decisions',
+  contradictions: 'contrad.',
+  assumptions:    'assumpt.',
+  traces:         'traces',
+  audit_db:       'audit.db',
+};
+
 async function loadGovAudit() {
   const el = document.getElementById('gov-content');
-  el.innerHTML = '<div class="page-title">Audit Trail</div><div style="margin-bottom:12px;display:flex;gap:8px"><input class="filter-input" style="max-width:300px" placeholder="Search events..." id="audit-search" oninput="filterAudit()"><button class="btn" onclick="verifyAudit()">Verify All</button></div><div class="table-wrap" id="audit-list"></div>';
+  el.innerHTML = `<div class="page-title">Audit Trail</div>
+    <div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input class="filter-input" style="max-width:240px" placeholder="Search events, actors, descriptions…" id="audit-search" oninput="filterAudit()">
+      <select class="filter-select" style="width:auto" id="audit-source" onchange="filterAudit()">
+        <option value="">All sources</option>
+        <option value="decisions">Decisions</option>
+        <option value="contradictions">Contradictions</option>
+        <option value="assumptions">Assumptions</option>
+        <option value="traces">Traces (events.jsonl)</option>
+        <option value="audit_db">Merkle (audit.db)</option>
+      </select>
+      <select class="filter-select" style="width:auto" id="audit-result" onchange="filterAudit()">
+        <option value="">All results</option>
+        <option value="pass">Pass</option>
+        <option value="warning">Warning</option>
+        <option value="fail">Fail</option>
+        <option value="info">Info</option>
+      </select>
+      <button class="btn" onclick="verifyAudit()">Verify Merkle</button>
+      <button class="btn" onclick="downloadAuditCSV()" style="margin-left:auto">↓ CSV</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px" id="audit-count"></div>
+    <div class="table-wrap" id="audit-list"></div>`;
   try {
-    const data = await fetch(API + '/api/audit?limit=200').then(r => r.json());
+    const data = await fetch(API + '/api/audit?limit=1000').then(r => r.json());
     window._auditData = data.entries || [];
+    const src = data.sources || {};
+    const parts = [];
+    if (src.decisions)     parts.push(`${src.decisions} decisions`);
+    if (src.contradictions)parts.push(`${src.contradictions} contradictions`);
+    if (src.assumptions)   parts.push(`${src.assumptions} assumptions`);
+    if (src.traces)        parts.push(`${src.traces} trace events`);
+    if (src.audit_db)      parts.push(`${src.audit_db} audit.db`);
+    document.getElementById('audit-count').textContent =
+      `${window._auditData.length} total events — ${parts.join(' · ')}`;
     renderAuditEntries(window._auditData);
-  } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed: ${esc(e.message)}</p>`; }
+  } catch(e) { el.innerHTML += `<p style="color:var(--red)">Failed to load audit trail: ${esc(e.message)}</p>`; }
 }
 
 function filterAudit() {
-  const q = (document.getElementById('audit-search').value || '').toLowerCase();
-  const filtered = (window._auditData || []).filter(e => JSON.stringify(e).toLowerCase().includes(q));
+  const q   = (document.getElementById('audit-search')?.value  || '').toLowerCase();
+  const src = (document.getElementById('audit-source')?.value  || '');
+  const res = (document.getElementById('audit-result')?.value  || '');
+  const filtered = (window._auditData || []).filter(e => {
+    if (src && e.source !== src) return false;
+    if (res && e.result !== res) return false;
+    if (q) {
+      const hay = [e.label, e.description, e.actor, e.event_type, e.source].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
   renderAuditEntries(filtered);
 }
 
 async function verifyAudit() {
   try {
-    const data = await fetch(API + '/api/audit?limit=200&verify=true').then(r => r.json());
+    const data = await fetch(API + '/api/audit?limit=1000&verify=true').then(r => r.json());
     window._auditData = data.entries || [];
     renderAuditEntries(window._auditData);
   } catch(e) { console.error(e); }
 }
 
+function downloadAuditCSV() {
+  const entries = window._auditData || [];
+  if (!entries.length) return;
+  const cols = ['timestamp','event_type','label','description','actor','result','source'];
+  const esc_csv = v => `"${String(v||'').replace(/"/g,'""')}"`;
+  const rows = [cols.join(',')].concat(entries.map(e => cols.map(c => esc_csv(e[c])).join(',')));
+  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `vt-audit-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
 function renderAuditEntries(entries) {
   const el = document.getElementById('audit-list');
-  if (!entries.length) { el.innerHTML = '<div style="padding:16px;color:var(--text-dim)">No audit entries.</div>'; return; }
-  el.innerHTML = entries.map(e => {
-    const typeBg = e.event_type.includes('contradiction') ? 'rgba(248,113,113,0.05)' : e.event_type.includes('decision') ? 'rgba(129,140,248,0.05)' : 'transparent';
-    return `<div class="audit-entry" style="background:${typeBg}">
-      <span class="audit-time">${fmtDate(e.timestamp)} ${fmtTime(e.timestamp)}</span>
-      <span class="audit-type">${esc(e.event_type)}</span>
-      <span style="min-width:100px">${esc(e.actor)}</span>
-      <span style="flex:1;font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(JSON.stringify(e.payload || {}).slice(0, 120))}</span>
-      ${e.verified === true ? '<span class="badge success">Verified</span>' : e.verified === false ? '<span class="badge critical">Failed</span>' : ''}
+  if (!entries || !entries.length) {
+    el.innerHTML = '<div style="padding:20px 16px;color:var(--text-dim);font-size:13px">No audit entries found.</div>';
+    return;
+  }
+  const header = `<div style="display:flex;align-items:center;gap:8px;padding:8px 16px;background:var(--bg-surface);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-dim);border-bottom:1px solid var(--border)">
+    <span style="min-width:28px"></span>
+    <span style="min-width:138px">Timestamp</span>
+    <span style="min-width:172px">Action</span>
+    <span style="flex:1">Description</span>
+    <span style="min-width:100px">Actor</span>
+    <span style="min-width:58px">Result</span>
+    <span style="min-width:56px">Source</span>
+  </div>`;
+  const rows = entries.map(e => {
+    const meta = auditMeta(e.event_type);
+    const srcLabel = AUDIT_SOURCE_LABEL[e.source] || e.source || '';
+    const verifiedIcon = e.verified === true
+      ? ' <span title="Merkle verified" style="color:var(--green);font-size:10px">⊕</span>'
+      : e.verified === false
+        ? ' <span title="Verification failed" style="color:var(--red);font-size:10px">⊗</span>'
+        : '';
+    const rowBg = e.result === 'warning' ? 'rgba(217,119,6,0.04)'
+                : e.result === 'fail'    ? 'rgba(220,38,38,0.04)'
+                : e.event_type.startsWith('decision') ? 'rgba(109,40,217,0.03)'
+                : 'transparent';
+    return `<div class="audit-entry" style="background:${rowBg}">
+      <span style="min-width:28px;font-size:15px;text-align:center;color:${meta.color};flex-shrink:0">${meta.icon}</span>
+      <span class="audit-time" style="min-width:138px">${fmtDate(e.timestamp)}&nbsp;${fmtTime(e.timestamp)}</span>
+      <span class="audit-type" style="min-width:172px;color:${meta.color}">${esc(e.label || e.event_type)}</span>
+      <span style="flex:1;font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.description||'')}">${esc(e.description||'—')}</span>
+      <span style="min-width:100px;font-size:11px;font-family:var(--mono);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.actor||'—')}</span>
+      <span style="min-width:58px">${AUDIT_RESULT_DESC[e.result]||''}</span>
+      <span style="min-width:56px;font-size:9px;font-family:var(--mono);color:var(--text-dim)">${esc(srcLabel)}${verifiedIcon}</span>
     </div>`;
   }).join('');
+  el.innerHTML = header + rows;
 }
 
 /* --- Governance: Settings --- */
@@ -1186,16 +1954,8 @@ async function initDashboard() {
   navTo(landing);
   try { connectWS(); } catch {}
 
-  // Update contradiction badge
-  try {
-    const data = await fetch(API + '/api/contradictions?status=unresolved').then(r => r.json());
-    if (data.total > 0) {
-      const axiomNav = document.querySelector('[data-page="axiom"]');
-      if (axiomNav && !axiomNav.querySelector('.badge')) {
-        axiomNav.innerHTML += ` <span class="badge" style="margin-left:auto;background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:10px">${data.total}</span>`;
-      }
-    }
-  } catch {}
+  // Update contradiction badge (Bug 6 fix — always refresh on init)
+  updateBadges();
 }
 
 initDashboard();

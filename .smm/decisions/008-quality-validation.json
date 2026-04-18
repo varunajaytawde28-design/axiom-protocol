@@ -1,0 +1,23 @@
+{
+  "id": "357383dc-72db-40ef-84d5-851cebb1ec17",
+  "title": "Detected: Input Validation",
+  "content": "This project uses input validation via pydantic. Do not introduce manual validation, alternative validation libraries without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:pydantic",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "error-handling"
+  ],
+  "constraints": [
+    "This project uses input validation via pydantic. Do not introduce manual validation, alternative validation libraries without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948696Z",
+  "valid": true
+}

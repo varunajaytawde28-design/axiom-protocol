@@ -89,25 +89,25 @@ def make_week_seven_decisions() -> list[Decision]:
     dim_titles = {
         Dimension.DATABASE: [
             ("Use PostgreSQL for primary store", "PostgreSQL with MVCC for concurrent access."),
-            ("Use Redis for session storage", "Redis provides fast session lookups."),
+            ("PostgreSQL read replicas for scaling", "PostgreSQL streaming replication for read scaling."),
         ],
         Dimension.AUTH: [
             ("JWT for API authentication", "Stateless JWT tokens for API auth."),
-            ("OAuth2 for external integrations", "OAuth2 flow for third-party access."),
+            ("JWT refresh token rotation", "JWT refresh tokens with automatic rotation policy."),
         ],
         Dimension.CACHING: [
             ("Redis caching layer", "Cache hot queries in Redis with 5min TTL."),
         ],
         Dimension.API_STYLE: [
             ("REST API with OpenAPI spec", "RESTful endpoints with full OpenAPI documentation."),
-            ("GraphQL for mobile clients", "GraphQL endpoint for flexible mobile queries."),
+            ("REST API versioning strategy", "REST API versioned via URL path prefix /v1/, /v2/."),
         ],
         Dimension.DEPLOYMENT: [
             ("Docker containers on ECS", "Containerized deployment on AWS ECS Fargate."),
         ],
         Dimension.CONCURRENCY: [
-            ("Celery for async tasks", "Celery with Redis broker for background jobs."),
-            ("asyncio for I/O-bound ops", "Python asyncio for database and API calls."),
+            ("Asyncio for I/O-bound ops", "Python asyncio for database and API calls."),
+            ("Asyncio task groups for parallelism", "Asyncio TaskGroup for structured concurrent I/O."),
         ],
         Dimension.LOGGING: [
             ("Structured JSON logging", "All logs in structured JSON format to stdout."),
@@ -119,11 +119,11 @@ def make_week_seven_decisions() -> list[Decision]:
             ("Centralized error handler", "Global exception handler with Sentry integration."),
         ],
         Dimension.STATE_MANAGEMENT: [
-            ("Server-side sessions", "Server-side session state in Redis."),
+            ("Server-side sessions", "Server-side session state with signed cookies."),
         ],
         Dimension.MESSAGING: [
             ("RabbitMQ for events", "RabbitMQ for inter-service event communication."),
-            ("Kafka for audit stream", "Kafka for high-volume audit event streaming."),
+            ("RabbitMQ dead-letter queues", "RabbitMQ DLX for failed message retry handling."),
         ],
         Dimension.SECURITY: [
             ("OWASP Top 10 compliance", "All endpoints validated against OWASP Top 10."),

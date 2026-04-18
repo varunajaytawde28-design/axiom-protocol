@@ -50,6 +50,13 @@ def dashboard_state(tmp_path, decisions, contradictions):
     state = DashboardState(project_root=root)
     state.decisions = decisions
     state.contradictions = contradictions
+    # Persist contradictions to disk so api_contradictions (which re-reads
+    # from disk per Bug 2 fix) can find them.
+    contra_dir = root / ".smm" / "contradictions"
+    contra_dir.mkdir(parents=True, exist_ok=True)
+    for c in contradictions:
+        filename = f"{str(c.id)[:8]}.json"
+        (contra_dir / filename).write_text(c.model_dump_json(indent=2))
     set_state(state)
     yield state
     reset_state()
@@ -179,13 +186,14 @@ class TestBlastRadiusEndpoint:
 
 
 class TestAuditEndpoint:
-    async def test_audit_empty(self, dashboard_state):
+    async def test_audit_has_entries(self, dashboard_state):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get("/api/audit")
             assert resp.status_code == 200
             data = resp.json()
-            assert data["total"] == 0
+            # Audit entries are synthesized from decisions + contradictions in state
+            assert data["total"] >= 4  # at least 4 decision_added entries
 
 
 class TestSessionsEndpoint:

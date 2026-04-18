@@ -92,6 +92,14 @@ def _make_state(
     state = DashboardState(project_root=tmp_path)
     state.decisions = decisions or []
     state.contradictions = contradictions or []
+    # Persist contradictions to disk so api_contradictions (which re-reads from
+    # disk per Bug 2 fix) can find them.
+    if contradictions:
+        contra_dir = tmp_path / ".smm" / "contradictions"
+        contra_dir.mkdir(parents=True, exist_ok=True)
+        for c in contradictions:
+            filename = f"{str(c.id)[:8]}.json"
+            (contra_dir / filename).write_text(c.model_dump_json(indent=2))
     return state
 
 

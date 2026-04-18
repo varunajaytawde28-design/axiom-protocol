@@ -1,0 +1,23 @@
+{
+  "id": "60af7fbd-c2f6-47f8-b825-3e10182b1d9d",
+  "title": "Detected: Monkey Patching / AOP",
+  "content": "This project uses monkey patching / aop via wrapt. Do not introduce unittest.mock.patch for production instrumentation, alternative AOP libraries without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:wrapt",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "state-management"
+  ],
+  "constraints": [
+    "This project uses monkey patching / aop via wrapt. Do not introduce unittest.mock.patch for production instrumentation, alternative AOP libraries without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.949253Z",
+  "valid": true
+}

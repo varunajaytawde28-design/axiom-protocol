@@ -13,6 +13,8 @@ from vt_protocol.decisions.taxonomy import (
     TAXONOMY,
     DimensionMatch,
     SubDimension,
+    _extract_package_extras,
+    _extract_package_name,
     get_subdimension,
     get_subdimensions_for,
     scan_project,
@@ -66,6 +68,37 @@ class TestLookup:
         assert "database.relational" in ids
         assert "database.nosql" in ids
         assert "database.orm" in ids
+
+
+class TestExtractPackageName:
+    def test_plain_package(self) -> None:
+        assert _extract_package_name("celery") == "celery"
+
+    def test_version_spec(self) -> None:
+        assert _extract_package_name("celery>=5.3.0") == "celery"
+
+    def test_bracket_extras_stripped(self) -> None:
+        assert _extract_package_name("celery[redis]>=5.3.0") == "celery"
+
+    def test_multiple_extras_stripped(self) -> None:
+        assert _extract_package_name("celery[redis,amqp]>=5.3.0") == "celery"
+
+
+class TestExtractPackageExtras:
+    def test_single_extra(self) -> None:
+        assert _extract_package_extras("celery[redis]>=5.3.0") == ["redis"]
+
+    def test_multiple_extras(self) -> None:
+        assert _extract_package_extras("celery[redis,amqp]>=5.3.0") == ["redis", "amqp"]
+
+    def test_no_extras(self) -> None:
+        assert _extract_package_extras("celery>=5.3.0") == []
+
+    def test_plain_name(self) -> None:
+        assert _extract_package_extras("celery") == []
+
+    def test_extras_with_spaces(self) -> None:
+        assert _extract_package_extras("celery[ redis , amqp ]>=5") == ["redis", "amqp"]
 
 
 class TestAutoDetection:
@@ -126,6 +159,28 @@ class TestAutoDetection:
         dims = {m.sub_dimension.id for m in matches}
         assert "comm.queue" in dims  # celery
         assert "obs.logging" in dims  # structlog
+
+    def test_bracket_extras_detected_as_packages(self, tmp_path: Path) -> None:
+        """celery[redis]>=5.3.0 should detect both celery (task queue) and redis (caching/nosql)."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[project]\nname = "test"\ndependencies = ["celery[redis]>=5.3.0"]\n'
+        )
+        (tmp_path / ".git").mkdir()
+        matches = scan_project(tmp_path)
+        dims = {m.sub_dimension.id for m in matches}
+        assert "comm.queue" in dims, "celery should be detected as task queue"
+        assert "database.nosql" in dims or "arch.caching" in dims, (
+            "redis extra should be detected as NoSQL/caching"
+        )
+
+    def test_bracket_extras_requirements_txt(self, tmp_path: Path) -> None:
+        """celery[redis,amqp]>=5 in requirements.txt — all three packages detected."""
+        (tmp_path / "requirements.txt").write_text("celery[redis,amqp]>=5\n")
+        (tmp_path / ".git").mkdir()
+        matches = scan_project(tmp_path)
+        dims = {m.sub_dimension.id for m in matches}
+        assert "comm.queue" in dims  # celery
+        assert "database.nosql" in dims or "arch.caching" in dims  # redis
 
     def test_confidence_scales_with_evidence(self, tmp_path: Path) -> None:
         (tmp_path / "requirements.txt").write_text("pytest\nfactory-boy\n")

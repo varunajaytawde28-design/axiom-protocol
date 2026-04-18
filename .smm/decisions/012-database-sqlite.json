@@ -1,0 +1,23 @@
+{
+  "id": "0aab513a-0193-4eb7-a2e8-59928fe978d0",
+  "title": "Detected: SQLite Database",
+  "content": "This project uses sqlite database via sqlite3. Do not introduce PostgreSQL, MongoDB, any external database without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: import:sqlite3",
+  "status": "superseded",
+  "decision_type": "constraint",
+  "dimensions": [
+    "database"
+  ],
+  "constraints": [
+    "This project uses sqlite database via sqlite3. Do not introduce PostgreSQL, MongoDB, any external database without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.949021Z",
+  "valid": false
+}

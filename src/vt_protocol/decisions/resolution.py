@@ -12,7 +12,9 @@ frontend to render as one-click buttons.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from vt_protocol.decisions.models import (
@@ -20,6 +22,7 @@ from vt_protocol.decisions.models import (
     ContradictionStatus,
     ContradictionVerdict,
     Decision,
+    DecisionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -233,7 +236,7 @@ def apply_resolution(
         if decisions:
             for d in decisions:
                 if d.id == contradiction.decision_b_id:
-                    d.status = "superseded"  # type: ignore[assignment]
+                    d.status = DecisionStatus.SUPERSEDED
                     d.valid = False
                     changes.append(f"Marked '{d.title}' as superseded")
 
@@ -250,7 +253,7 @@ def apply_resolution(
         if decisions:
             for d in decisions:
                 if d.id == contradiction.decision_a_id:
-                    d.status = "superseded"  # type: ignore[assignment]
+                    d.status = DecisionStatus.SUPERSEDED
                     d.valid = False
                     changes.append(f"Marked '{d.title}' as superseded")
 
@@ -291,3 +294,93 @@ def apply_resolution(
         result["error"] = f"Unknown action: {action}"
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Refactor task generation (Bug 1)
+# ---------------------------------------------------------------------------
+
+
+def generate_refactor_task(
+    project_root: Path | str,
+    contradiction: Contradiction,
+    *,
+    loser_id: str,
+    loser_title: str,
+    winner_title: str,
+    actor: str = "dashboard-user",
+) -> Path:
+    """Write a pending-refactor task file after a pick_a/pick_b resolution.
+
+    File: .smm/pending-refactors/refactor-{contradiction_id[:8]}.md
+    Returned path can be included in MCP context so the agent acts on it.
+    """
+    from datetime import date
+
+    root = Path(project_root)
+    refactors_dir = root / ".smm" / "pending-refactors"
+    refactors_dir.mkdir(parents=True, exist_ok=True)
+
+    today = date.today().isoformat()
+    affected = _find_affected_files(root, loser_title)
+
+    lines: list[str] = [
+        f"# Refactor: {loser_title} → {winner_title}",
+        "",
+        f"**Resolved:** {today}  ",
+        f"**Actor:** {actor}  ",
+        f"**Contradiction ID:** {str(contradiction.id)[:8]}  ",
+        "",
+        "## What was superseded",
+        f"- {loser_title}",
+        "",
+        "## What won",
+        f"- {winner_title}",
+        "",
+        "## Suggested task",
+        f"Migrate code that uses `{loser_title}` to use `{winner_title}` instead.",
+        f"Per architectural decision resolved on {today}.",
+        "",
+    ]
+    if affected:
+        lines.append("## Potentially affected files")
+        lines.extend(f"- {f}" for f in affected)
+        lines.append("")
+    lines.extend([
+        "## Next step",
+        "In your next session, look for usages of the superseded technology",
+        "and migrate them to the winner. Delete this file when complete.",
+    ])
+
+    path = refactors_dir / f"refactor-{str(contradiction.id)[:8]}.md"
+    path.write_text("\n".join(lines))
+    logger.info("Generated refactor task: %s", path)
+    return path
+
+
+def _find_affected_files(project_root: Path, loser_title: str) -> list[str]:
+    """Best-effort scan for .py files that may reference the superseded technology."""
+    # Extract meaningful keywords (skip common English words and short tokens)
+    _STOPWORDS = {"use", "the", "and", "or", "for", "with", "via", "api",
+                  "in", "a", "an", "at", "of", "to", "is", "are", "be"}
+    words = re.findall(r"\b[A-Za-z][A-Za-z0-9_-]+\b", loser_title)
+    keywords = [w.lower() for w in words if len(w) > 2 and w.lower() not in _STOPWORDS]
+    if not keywords:
+        return []
+
+    affected: list[str] = []
+    try:
+        for py_file in sorted(project_root.rglob("*.py")):
+            if any(p in py_file.parts for p in (".venv", "__pycache__", ".git", "node_modules")):
+                continue
+            try:
+                content = py_file.read_text(errors="replace").lower()
+                if any(kw in content for kw in keywords):
+                    affected.append(str(py_file.relative_to(project_root)))
+                if len(affected) >= 20:
+                    break
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return affected

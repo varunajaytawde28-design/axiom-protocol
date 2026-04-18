@@ -1,0 +1,8 @@
+---
+description: "Detected: Relational Database"
+alwaysApply: true
+---
+
+# Detected: Relational Database
+
+This project uses relational database via psycopg and asyncpg and sqlite3. Do not introduce MongoDB, DynamoDB, Cassandra, other NoSQL databases without explicit approval.

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "vt-protocol": {
+      "command": "vt",
+      "args": [
+        "serve",
+        "--stdio"
+      ]
+    }
+  }
+}

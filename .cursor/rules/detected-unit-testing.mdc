@@ -1,0 +1,8 @@
+---
+description: "Detected: Unit Testing"
+alwaysApply: true
+---
+
+# Detected: Unit Testing
+
+This project uses unit testing via pytest and unittest and tests. Do not introduce alternative test frameworks without explicit approval.

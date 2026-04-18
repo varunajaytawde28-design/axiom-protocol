@@ -1,0 +1,23 @@
+{
+  "id": "634b3b6b-b46b-4cb4-8fcb-a69377204da1",
+  "title": "Detected: Similarity Detection",
+  "content": "This project uses similarity detection via datasketch. Do not introduce alternative similarity/ANN libraries without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:datasketch",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "database"
+  ],
+  "constraints": [
+    "This project uses similarity detection via datasketch. Do not introduce alternative similarity/ANN libraries without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.949332Z",
+  "valid": true
+}

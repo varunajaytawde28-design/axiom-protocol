@@ -1,0 +1,8 @@
+---
+description: "Detected: HTTP Server (stdlib)"
+alwaysApply: true
+---
+
+# Detected: HTTP Server (stdlib)
+
+This project uses http server (stdlib) via http.server and socketserver. Do not introduce Flask, FastAPI, Django, external web frameworks without explicit approval.

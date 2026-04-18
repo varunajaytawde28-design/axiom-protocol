@@ -1,0 +1,8 @@
+---
+description: "Detected: Concurrency"
+alwaysApply: true
+---
+
+# Detected: Concurrency
+
+This project uses concurrency via asyncio. Do not introduce threading, multiprocessing, alternative async frameworks without explicit approval.

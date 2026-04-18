@@ -189,9 +189,12 @@ def _write_root_claude_md(path: Path, governance_content: str) -> None:
     """Write governance rules to root CLAUDE.md.
 
     If the file already exists, replace the governance section (between markers)
-    or append it at the end. If it doesn't exist, write the full content.
+    or append it at the end. If it doesn't exist, write with markers.
+
+    Content is ALWAYS written inside BEGIN/END VT PROTOCOL GOVERNANCE markers
+    to support idempotent re-runs without duplication.
     """
-    wrapped = f"\n\n{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
+    wrapped = f"{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
 
     if path.is_file():
         existing = path.read_text()
@@ -199,13 +202,15 @@ def _write_root_claude_md(path: Path, governance_content: str) -> None:
             # Replace existing governance section
             start = existing.index(_GOVERNANCE_START)
             end = existing.index(_GOVERNANCE_END) + len(_GOVERNANCE_END)
-            updated = existing[:start].rstrip() + wrapped + existing[end:].lstrip("\n")
-            path.write_text(updated)
+            before = existing[:start].rstrip()
+            after = existing[end:].lstrip("\n")
+            prefix = before + "\n\n" if before else ""
+            path.write_text(prefix + wrapped + after)
         else:
             # Append governance section
-            path.write_text(existing.rstrip() + wrapped)
+            path.write_text(existing.rstrip() + "\n\n" + wrapped)
     else:
-        path.write_text(governance_content)
+        path.write_text(wrapped)
 
 
 def _write_root_agent_file(path: Path, governance_content: str) -> None:
@@ -213,16 +218,18 @@ def _write_root_agent_file(path: Path, governance_content: str) -> None:
 
     Same append/replace logic as CLAUDE.md.
     """
-    wrapped = f"\n\n{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
+    wrapped = f"{_GOVERNANCE_START}\n{governance_content}\n{_GOVERNANCE_END}\n"
 
     if path.is_file():
         existing = path.read_text()
         if _GOVERNANCE_START in existing:
             start = existing.index(_GOVERNANCE_START)
             end = existing.index(_GOVERNANCE_END) + len(_GOVERNANCE_END)
-            updated = existing[:start].rstrip() + wrapped + existing[end:].lstrip("\n")
-            path.write_text(updated)
+            before = existing[:start].rstrip()
+            after = existing[end:].lstrip("\n")
+            prefix = before + "\n\n" if before else ""
+            path.write_text(prefix + wrapped + after)
         else:
-            path.write_text(existing.rstrip() + wrapped)
+            path.write_text(existing.rstrip() + "\n\n" + wrapped)
     else:
-        path.write_text(governance_content)
+        path.write_text(wrapped)

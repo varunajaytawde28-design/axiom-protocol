@@ -1,0 +1,8 @@
+---
+description: "Detected: Similarity Detection"
+alwaysApply: true
+---
+
+# Detected: Similarity Detection
+
+This project uses similarity detection via datasketch. Do not introduce alternative similarity/ANN libraries without explicit approval.

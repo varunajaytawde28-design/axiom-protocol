@@ -1,0 +1,23 @@
+{
+  "id": "807c1678-d750-4979-b1fd-61dbf002c7bc",
+  "title": "Detected: Relational Database",
+  "content": "This project uses relational database via psycopg and asyncpg and sqlite3. Do not introduce MongoDB, DynamoDB, Cassandra, other NoSQL databases without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: python:psycopg, python:asyncpg, import:sqlite3",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "database"
+  ],
+  "constraints": [
+    "This project uses relational database via psycopg and asyncpg and sqlite3. Do not introduce MongoDB, DynamoDB, Cassandra, other NoSQL databases without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.947307Z",
+  "valid": true
+}

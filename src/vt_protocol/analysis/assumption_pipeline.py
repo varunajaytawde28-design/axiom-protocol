@@ -2,14 +2,17 @@
 
 Runs the full assumption lifecycle:
   1. Scan code for implicit domain assumptions
-  2. Filter by confidence threshold
-  3. Deduplicate against existing assumptions
-  4. Freeze-on-adopt baseline tagging (first scan)
-  5. Generate bounded multiple-choice questions
-  6. Transition DETECTED -> PROPOSED
-  7. Persist to .smm/assumptions/
+  2. Filter by tiered confidence thresholds (architectural vs implementation)
+  3. Filter shadow-mode patterns (statistical auto-disable)
+  4. Deduplicate against existing assumptions
+  5. Freeze-on-adopt baseline tagging (first scan)
+  6. Cluster similar assumptions (unsupervised grouping)
+  7. Prioritize by graph centrality + churn
+  8. Generate bounded multiple-choice questions
+  9. Transition DETECTED -> PROPOSED
+ 10. Persist to .smm/assumptions/
 
-Also provides resolution, storage, and adaptive-learning stats functions.
+Also provides resolution, storage, adaptive-learning stats, and metrics.
 """
 
 from __future__ import annotations
@@ -21,7 +24,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vt_protocol.analysis.assumptions import scan_changed_files, scan_directory
+from vt_protocol.analysis.assumptions import (
+    PATTERNS,
+    get_pattern_mode,
+    get_tiered_threshold,
+    load_pattern_stats,
+    save_pattern_stats,
+    scan_changed_files,
+    scan_directory,
+    update_pattern_stats,
+)
 from vt_protocol.analysis.assumption_questions import generate_question
 from vt_protocol.decisions.models import (
     AssumptionStatus,
@@ -33,6 +45,9 @@ logger = logging.getLogger(__name__)
 
 # Default confidence threshold when not specified in governance config.
 _DEFAULT_CONFIDENCE_THRESHOLD = 0.5
+
+# Pattern tier lookup — built from PATTERNS registry
+_PATTERN_TIERS: dict[str, str] = {p.pattern_id: p.tier for p in PATTERNS}
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +64,9 @@ class AssumptionPipelineResult:
     pre_validated: int = 0
     deduped: int = 0
     below_threshold: int = 0
+    shadowed: int = 0
+    clusters_formed: int = 0
+    cluster_compression: float = 0.0
     assumptions: list[DomainAssumption] = field(default_factory=list)
 
 
@@ -65,6 +83,9 @@ def run_assumption_pipeline(
     existing: list[DomainAssumption] | None = None,
 ) -> AssumptionPipelineResult:
     """Run the full assumption detection-to-proposal pipeline.
+
+    Enhanced pipeline with tiered thresholds, shadow mode, clustering,
+    and priority scoring.
 
     Args:
         root: Project root directory.
@@ -93,23 +114,41 @@ def run_assumption_pipeline(
     if not raw_assumptions:
         return result
 
-    # ── Stage 2: Threshold filter ──────────────────────────────────────
-    threshold = _DEFAULT_CONFIDENCE_THRESHOLD
-    if config is not None and hasattr(config.rules, "assumption_threshold"):
-        threshold = config.rules.assumption_threshold  # type: ignore[attr-defined]
+    # ── Stage 2: Tiered threshold filter ───────────────────────────────
+    # Each pattern has a tier (architectural vs implementation) with
+    # different confidence thresholds.
+    pattern_stats = load_pattern_stats(root)
 
     above_threshold: list[DomainAssumption] = []
     for assumption in raw_assumptions:
+        # Update triggered count
+        update_pattern_stats(pattern_stats, assumption.pattern_id, "triggered")
+
+        # Check shadow mode (statistical auto-disable)
+        mode = get_pattern_mode(pattern_stats, assumption.pattern_id)
+        if mode == "shadow":
+            result.shadowed += 1
+            logger.debug("Shadow mode: %s (%s)", assumption.pattern_id, assumption.summary)
+            continue
+
+        # Use tiered threshold
+        tier = _PATTERN_TIERS.get(assumption.pattern_id, "implementation")
+        threshold = get_tiered_threshold(tier)
+
         if assumption.confidence < threshold:
             result.below_threshold += 1
             logger.debug(
-                "Below threshold (%.2f < %.2f): %s",
+                "Below %s threshold (%.2f < %.2f): %s",
+                tier,
                 assumption.confidence,
                 threshold,
                 assumption.summary,
             )
         else:
             above_threshold.append(assumption)
+
+    # Save updated pattern stats
+    save_pattern_stats(root, pattern_stats)
 
     if not above_threshold:
         return result
@@ -150,8 +189,46 @@ def run_assumption_pipeline(
         for assumption in deduplicated:
             assumption.is_baseline = True
 
-    # ── Stage 5: Generate questions ────────────────────────────────────
+    # ── Stage 5: Cluster similar assumptions ───────────────────────────
+    try:
+        from vt_protocol.analysis.assumption_cluster import cluster_assumptions
+        clusters = cluster_assumptions(deduplicated)
+        result.clusters_formed = len(clusters)
+        if result.clusters_formed > 0 and len(deduplicated) > 0:
+            result.cluster_compression = len(deduplicated) / result.clusters_formed
+
+        # Use cluster representatives for display, preserving all for storage
+        clustered = []
+        for cluster in clusters:
+            rep = cluster.representative
+            # Annotate the representative with cluster info
+            if cluster.count > 1:
+                rep.summary = f"[{cluster.count}x] {rep.summary}"
+            clustered.append(rep)
+        deduplicated = clustered
+        logger.info(
+            "Clustered %d assumptions into %d groups (%.1fx compression)",
+            result.detected - result.below_threshold - result.shadowed,
+            result.clusters_formed,
+            result.cluster_compression,
+        )
+    except Exception:
+        logger.debug("Clustering unavailable, skipping", exc_info=True)
+
+    # ── Stage 6: Priority scoring ──────────────────────────────────────
+    try:
+        from vt_protocol.analysis.assumption_priority import prioritize_assumptions
+        prioritized = prioritize_assumptions(deduplicated, root)
+        # Sort by priority score descending
+        deduplicated = [p.assumption for p in prioritized]
+        logger.info("Prioritized %d assumptions by centrality + churn", len(deduplicated))
+    except Exception:
+        logger.debug("Priority scoring unavailable, skipping", exc_info=True)
+
+    # ── Stage 7: Generate questions ────────────────────────────────────
     for assumption in deduplicated:
+        if assumption.question:
+            continue  # Already has a question (from cluster representative)
         try:
             question_data = generate_question(assumption)
             if question_data is not None:
@@ -169,22 +246,26 @@ def run_assumption_pipeline(
                 exc_info=True,
             )
 
-    # ── Stage 6: Set status to PROPOSED ────────────────────────────────
+    # ── Stage 8: Set status to PROPOSED ────────────────────────────────
     for assumption in deduplicated:
         if assumption.status == AssumptionStatus.DETECTED:
             assumption.status = AssumptionStatus.PROPOSED
 
-    # ── Stage 7: Return ────────────────────────────────────────────────
+    # ── Stage 9: Return ────────────────────────────────────────────────
     result.new = len(deduplicated)
     result.assumptions = deduplicated
     logger.info(
         "Pipeline complete: %d detected, %d new, %d deduped, "
-        "%d pre-validated, %d below threshold",
+        "%d pre-validated, %d below threshold, %d shadowed, "
+        "%d clusters (%.1fx compression)",
         result.detected,
         result.new,
         result.deduped,
         result.pre_validated,
         result.below_threshold,
+        result.shadowed,
+        result.clusters_formed,
+        result.cluster_compression,
     )
     return result
 
@@ -328,6 +409,15 @@ def resolve_assumption(
     # Save back
     target_file.write_text(target_assumption.model_dump_json(indent=2))
 
+    # Update pattern stats for auto-disable tracking
+    try:
+        pattern_stats = load_pattern_stats(root)
+        event = new_status.value  # "validated", "rejected", or "deferred"
+        update_pattern_stats(pattern_stats, target_assumption.pattern_id, event)
+        save_pattern_stats(root, pattern_stats)
+    except Exception:
+        logger.debug("Failed to update pattern stats", exc_info=True)
+
     logger.info(
         "Resolved assumption %s -> %s (option %d: %s)",
         assumption_id[:8],
@@ -445,3 +535,128 @@ def load_stats(root: Path) -> AssumptionStats:
     except Exception:
         logger.warning("Failed to load stats from %s", filepath)
         return AssumptionStats()
+
+
+# ---------------------------------------------------------------------------
+# Tracking Metrics (Improvement #6)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AssumptionMetrics:
+    """Tracking metrics for assumption detection quality."""
+
+    # TTFVA: Time to First Valuable Assumption (seconds)
+    # Time from first scan to first VALIDATED assumption
+    ttfva_seconds: float | None = None
+
+    # Cognitive Value Ratio: architectural validations / implementation validations
+    cognitive_value_ratio: float = 0.0
+
+    # Cluster efficiency: raw assumptions / clusters shown (higher = better batching)
+    cluster_efficiency: float = 1.0
+
+    # Rule ROI per pattern
+    rule_roi: dict[str, float] = field(default_factory=dict)
+
+    # Summary counts
+    total_architectural: int = 0
+    total_implementation: int = 0
+    validated_architectural: int = 0
+    validated_implementation: int = 0
+
+
+def compute_metrics(
+    root: Path,
+    assumptions: list[DomainAssumption] | None = None,
+) -> AssumptionMetrics:
+    """Compute tracking metrics for the assumption detection system.
+
+    Args:
+        root: Project root.
+        assumptions: Pre-loaded assumptions. If None, loads from disk.
+
+    Returns:
+        AssumptionMetrics with all computed values.
+    """
+    from vt_protocol.analysis.assumptions import PATTERNS, compute_rule_roi, load_pattern_stats
+
+    if assumptions is None:
+        assumptions = load_assumptions(root)
+
+    metrics = AssumptionMetrics()
+
+    # Build tier lookup
+    tier_map = {p.pattern_id: p.tier for p in PATTERNS}
+
+    # Count by tier
+    first_scan_time: datetime | None = None
+    first_validated_time: datetime | None = None
+
+    for a in assumptions:
+        tier = tier_map.get(a.pattern_id, "implementation")
+        if tier == "architectural":
+            metrics.total_architectural += 1
+            if a.status == AssumptionStatus.VALIDATED:
+                metrics.validated_architectural += 1
+        else:
+            metrics.total_implementation += 1
+            if a.status == AssumptionStatus.VALIDATED:
+                metrics.validated_implementation += 1
+
+        # Track times for TTFVA
+        if first_scan_time is None or a.detected_at < first_scan_time:
+            first_scan_time = a.detected_at
+        if a.status == AssumptionStatus.VALIDATED and a.resolved_at:
+            if first_validated_time is None or a.resolved_at < first_validated_time:
+                first_validated_time = a.resolved_at
+
+    # TTFVA
+    if first_scan_time and first_validated_time:
+        delta = first_validated_time - first_scan_time
+        metrics.ttfva_seconds = delta.total_seconds()
+
+    # Cognitive Value Ratio
+    if metrics.validated_implementation > 0:
+        metrics.cognitive_value_ratio = (
+            metrics.validated_architectural / metrics.validated_implementation
+        )
+    elif metrics.validated_architectural > 0:
+        metrics.cognitive_value_ratio = float("inf")
+
+    # Rule ROI from pattern stats
+    pattern_stats = load_pattern_stats(root)
+    for pid in pattern_stats:
+        metrics.rule_roi[pid] = compute_rule_roi(pattern_stats, pid)
+
+    return metrics
+
+
+def format_metrics_summary(metrics: AssumptionMetrics) -> str:
+    """Format metrics into a human-readable summary string."""
+    lines = []
+
+    if metrics.ttfva_seconds is not None:
+        if metrics.ttfva_seconds < 60:
+            lines.append(f"TTFVA: {metrics.ttfva_seconds:.0f}s")
+        elif metrics.ttfva_seconds < 3600:
+            lines.append(f"TTFVA: {metrics.ttfva_seconds / 60:.1f}min")
+        else:
+            lines.append(f"TTFVA: {metrics.ttfva_seconds / 3600:.1f}h")
+
+    lines.append(
+        f"Cognitive Value: {metrics.cognitive_value_ratio:.1f}x "
+        f"({metrics.validated_architectural} arch / {metrics.validated_implementation} impl)"
+    )
+
+    if metrics.cluster_efficiency > 1.0:
+        lines.append(f"Cluster Efficiency: {metrics.cluster_efficiency:.1f}x compression")
+
+    # Top 3 Rule ROI
+    if metrics.rule_roi:
+        sorted_roi = sorted(metrics.rule_roi.items(), key=lambda x: x[1], reverse=True)
+        top = sorted_roi[:3]
+        roi_parts = [f"{pid}: {roi:.1f}" for pid, roi in top]
+        lines.append(f"Top Rule ROI: {', '.join(roi_parts)}")
+
+    return " | ".join(lines)

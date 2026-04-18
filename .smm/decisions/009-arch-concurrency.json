@@ -1,0 +1,23 @@
+{
+  "id": "66af4fd3-f601-45ff-9557-820cebfa06db",
+  "title": "Detected: Concurrency",
+  "content": "This project uses concurrency via asyncio. Do not introduce threading, multiprocessing, alternative async frameworks without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: import:asyncio",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "concurrency"
+  ],
+  "constraints": [
+    "This project uses concurrency via asyncio. Do not introduce threading, multiprocessing, alternative async frameworks without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.948787Z",
+  "valid": true
+}

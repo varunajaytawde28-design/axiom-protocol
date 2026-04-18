@@ -1,0 +1,8 @@
+---
+description: "Detected: REST API"
+alwaysApply: true
+---
+
+# Detected: REST API
+
+This project uses rest api via fastapi. Do not introduce GraphQL, gRPC, alternative HTTP frameworks without explicit approval.

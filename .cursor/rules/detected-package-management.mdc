@@ -1,0 +1,8 @@
+---
+description: "Detected: Package Management"
+alwaysApply: true
+---
+
+# Detected: Package Management
+
+This project uses package management via pyproject.toml. Do not introduce alternative package managers without explicit approval.

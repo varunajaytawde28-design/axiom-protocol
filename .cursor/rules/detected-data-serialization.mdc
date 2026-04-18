@@ -1,0 +1,8 @@
+---
+description: "Detected: Data Serialization"
+alwaysApply: true
+---
+
+# Detected: Data Serialization
+
+This project uses data serialization via pydantic. Do not introduce alternative validation/serialization libraries without explicit approval.

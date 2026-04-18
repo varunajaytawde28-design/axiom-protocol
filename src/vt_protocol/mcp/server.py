@@ -1,4 +1,4 @@
-"""MCP server — 5 tools for AI agent governance.
+"""MCP server — 6 tools for AI agent governance.
 
 Exposes the decision engine to AI agents via the Model Context Protocol.
 Uses FastMCP for tool registration. Each tool delivers a complete answer
@@ -21,6 +21,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastmcp import FastMCP
@@ -131,6 +132,42 @@ def check_before_coding(
     except Exception:
         contradictions = []
 
+    # Load deferred contradictions to surface as warnings
+    deferred_warnings: list[str] = []
+    try:
+        root = find_project_root(Path.cwd())
+        from vt_protocol.cli.commands import _load_local_contradictions
+        from vt_protocol.decisions.models import ContradictionStatus
+        all_contradictions = _load_local_contradictions(root)
+        for c in all_contradictions:
+            if c.status == ContradictionStatus.DEFERRED:
+                deferred_warnings.append(
+                    f"DEFERRED CONTRADICTION: {c.decision_a_title} vs {c.decision_b_title}. "
+                    "Human has not yet decided. Proceed with caution."
+                )
+    except Exception:
+        pass
+
+    # Load pending refactor tasks so the agent acts on them (Bug 1 fix)
+    pending_refactors: list[dict] = []
+    try:
+        root = find_project_root(Path.cwd())
+        pending_refactors = _load_pending_refactors(root)
+    except Exception:
+        pass
+
+    governance_note = (
+        f"Found {len(relevant)} relevant decisions. "
+        f"{len(contradictions)} unresolved contradictions in project."
+    )
+    if deferred_warnings:
+        governance_note += " " + " ".join(deferred_warnings)
+    if pending_refactors:
+        governance_note += (
+            f" {len(pending_refactors)} PENDING REFACTOR(S): "
+            + "; ".join(r["message"] for r in pending_refactors)
+        )
+
     result = {
         "session_id": session.session_id,
         "project": project,
@@ -147,10 +184,9 @@ def check_before_coding(
             for d in relevant[:5]  # Top 5 most relevant
         ],
         "unresolved_contradictions": len(contradictions),
-        "governance_note": (
-            f"Found {len(relevant)} relevant decisions. "
-            f"{len(contradictions)} unresolved contradictions in project."
-        ),
+        "deferred_contradictions": deferred_warnings,
+        "pending_refactors": pending_refactors,
+        "governance_note": governance_note,
     }
     return json.dumps(result, indent=2)
 
@@ -281,6 +317,30 @@ def get_project_decisions(
     if agent_cfg and agent_cfg.context_level == "minimal":
         content_limit = 0  # Only titles
 
+    # Include pending refactors so agent acts on them in the next session (Bug 1 fix)
+    pending_refactors: list[dict] = []
+    try:
+        root = find_project_root(Path.cwd())
+        pending_refactors = _load_pending_refactors(root)
+    except Exception:
+        pass
+
+    # Surface deferred contradictions as warnings
+    deferred_warnings: list[str] = []
+    try:
+        root = find_project_root(Path.cwd())
+        from vt_protocol.cli.commands import _load_local_contradictions
+        from vt_protocol.decisions.models import ContradictionStatus
+        all_contradictions = _load_local_contradictions(root)
+        for c in all_contradictions:
+            if c.status == ContradictionStatus.DEFERRED:
+                deferred_warnings.append(
+                    f"DEFERRED CONTRADICTION: {c.decision_a_title} vs {c.decision_b_title}. "
+                    "Human has not yet decided. Proceed with caution."
+                )
+    except Exception:
+        pass
+
     result = {
         "project": project,
         "dimension_filter": dimension or "all",
@@ -299,6 +359,8 @@ def get_project_decisions(
             }
             for d in decisions[:10]
         ],
+        "pending_refactors": pending_refactors,
+        "deferred_contradictions": deferred_warnings,
     }
     return json.dumps(result, indent=2, default=str)
 
@@ -403,6 +465,13 @@ def report_decision(
     if restricted_note:
         note = restricted_note
 
+    # Run contradiction detection after saving
+    contradictions_found: list[dict] = []
+    try:
+        contradictions_found = _run_contradiction_detection_after_save(project)
+    except Exception:
+        logger.debug("Post-save contradiction detection failed", exc_info=True)
+
     result = {
         "decision_id": str(decision_id),
         "title": title,
@@ -412,6 +481,8 @@ def report_decision(
         "session_id": session.session_id,
         "supersedes": supersedes or None,
         "note": note,
+        "contradictions_detected": len(contradictions_found),
+        "contradictions": contradictions_found,
     }
     return json.dumps(result, indent=2)
 
@@ -491,8 +562,129 @@ def get_resolution(
 
 
 # ---------------------------------------------------------------------------
+# Tool 6: complete_session
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def complete_session(
+    project: str = "",
+    agent_id: str = "",
+) -> str:
+    """Signal that the current coding session is complete.
+
+    Triggers automatic governance checks (contradiction detection) similar
+    to what ``vt check`` does. Call this at the end of a task or before
+    committing to ensure no contradictions were introduced.
+
+    Args:
+        project: Project identifier. Auto-detected if empty.
+        agent_id: Agent identifier.
+    """
+    project = project or _detect_project()
+
+    try:
+        root = find_project_root(Path.cwd())
+    except FileNotFoundError:
+        return json.dumps({
+            "project": project,
+            "status": "error",
+            "note": "Not a VT Protocol project (no .smm/ found).",
+        }, indent=2)
+
+    config = _load_config()
+    if config is None:
+        return json.dumps({
+            "project": project,
+            "status": "error",
+            "note": "Could not load governance config.",
+        }, indent=2)
+
+    # Load and check decisions
+    from vt_protocol.cli.commands import (
+        _detect_contradictions,
+        _load_local_contradictions,
+        _load_local_decisions,
+        _save_contradictions,
+    )
+
+    decisions = _load_local_decisions(root)
+    active = [d for d in decisions if d.valid]
+
+    detected = _detect_contradictions(active, config)
+    if detected:
+        _save_contradictions(root, detected)
+
+    contradictions = _load_local_contradictions(root)
+    actionable = [c for c in contradictions if c.is_actionable]
+
+    result = {
+        "project": project,
+        "status": "fail" if actionable else "pass",
+        "total_decisions": len(active),
+        "contradictions_detected": len(detected),
+        "total_contradictions": len(contradictions),
+        "actionable_contradictions": len(actionable),
+        "actionable": [
+            {
+                "decision_a": c.decision_a_title,
+                "decision_b": c.decision_b_title,
+                "verdict": c.verdict.value,
+                "reasoning": c.reasoning[:200],
+            }
+            for c in actionable[:5]
+        ],
+        "note": (
+            f"Session check complete. {len(actionable)} actionable contradictions."
+            if actionable
+            else "Session check complete. No contradictions found."
+        ),
+    }
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _run_contradiction_detection_after_save(project: str) -> list[dict]:
+    """Run contradiction detection after saving a new decision.
+
+    Returns list of contradiction summaries for inclusion in report_decision response.
+    """
+    try:
+        root = find_project_root(Path.cwd())
+    except FileNotFoundError:
+        return []
+
+    config = _load_config()
+    if config is None:
+        return []
+
+    from vt_protocol.cli.commands import (
+        _detect_contradictions,
+        _load_local_decisions,
+        _save_contradictions,
+    )
+
+    decisions = _load_local_decisions(root)
+    active = [d for d in decisions if d.valid]
+
+    detected = _detect_contradictions(active, config)
+    if detected:
+        _save_contradictions(root, detected)
+
+    return [
+        {
+            "decision_a": c.decision_a_title,
+            "decision_b": c.decision_b_title,
+            "verdict": c.verdict.value,
+            "reasoning": c.reasoning[:200],
+            "confidence": c.confidence,
+        }
+        for c in detected
+    ]
 
 
 def _get_agent_config(agent_id: str | None) -> AgentConfig | None:
@@ -655,6 +847,27 @@ def _filter_relevant_decisions(
         d for d in decisions
         if any(dim in path_dims for dim in d.dimensions)
     ]
+
+
+def _load_pending_refactors(root: Path) -> list[dict[str, Any]]:
+    """Load pending refactor task files from .smm/pending-refactors/ (Bug 1 fix)."""
+    refactors_dir = root / ".smm" / "pending-refactors"
+    if not refactors_dir.is_dir():
+        return []
+    refactors: list[dict[str, Any]] = []
+    for f in sorted(refactors_dir.glob("refactor-*.md")):
+        try:
+            lines = f.read_text().splitlines()
+            title = lines[0].lstrip("# ").strip() if lines else f.stem
+            refactors.append({
+                "id": f.stem,
+                "title": title,
+                "file": f.name,
+                "message": f"PENDING REFACTOR: {title}",
+            })
+        except Exception:
+            continue
+    return refactors
 
 
 def _detect_new_deps_in_diff(diff: str) -> list[str]:

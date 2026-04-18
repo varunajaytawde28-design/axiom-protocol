@@ -17,7 +17,13 @@ from vt_protocol.prevention.providers.agents_md import generate_agents_md
 from vt_protocol.prevention.providers.claude import generate_claude_md, generate_claude_rules
 from vt_protocol.prevention.providers.cursor import generate_cursor_rules
 from vt_protocol.prevention.priority import assign_tiers
-from vt_protocol.prevention.rulesync import sync_rules
+from vt_protocol.prevention.rulesync import (
+    _GOVERNANCE_END,
+    _GOVERNANCE_START,
+    _write_root_agent_file,
+    _write_root_claude_md,
+    sync_rules,
+)
 
 
 def _make_decision(title: str, dimensions: list[Dimension] | None = None) -> Decision:
@@ -179,3 +185,122 @@ class TestSyncRules:
         result = sync_rules(decisions, tmp_path, config)
         cursor_files = [f for f in result.files_written if ".cursor" in str(f)]
         assert len(cursor_files) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bug 2: vt apply duplicates CLAUDE.md content
+# ---------------------------------------------------------------------------
+
+
+class TestWriteRootClaudeMd:
+    """_write_root_claude_md must always use markers and never duplicate."""
+
+    def test_new_file_has_markers(self, tmp_path: Path) -> None:
+        """When CLAUDE.md doesn't exist, it should be written WITH markers."""
+        path = tmp_path / "CLAUDE.md"
+        _write_root_claude_md(path, "# Rules\nDo not use MongoDB.")
+
+        content = path.read_text()
+        assert _GOVERNANCE_START in content
+        assert _GOVERNANCE_END in content
+        assert content.count("Do not use MongoDB.") == 1
+
+    def test_idempotent_no_duplication(self, tmp_path: Path) -> None:
+        """Running twice should NOT duplicate content."""
+        path = tmp_path / "CLAUDE.md"
+        rules = "# Rules\nDo not use MongoDB."
+
+        _write_root_claude_md(path, rules)
+        first = path.read_text()
+
+        _write_root_claude_md(path, rules)
+        second = path.read_text()
+
+        assert first == second
+        assert second.count("Do not use MongoDB.") == 1
+        assert second.count(_GOVERNANCE_START) == 1
+        assert second.count(_GOVERNANCE_END) == 1
+
+    def test_preserves_existing_content_outside_markers(self, tmp_path: Path) -> None:
+        """User content outside markers must be preserved."""
+        path = tmp_path / "CLAUDE.md"
+        path.write_text("# My Project\n\nCustom instructions here.\n")
+
+        _write_root_claude_md(path, "# Governance\nUse PostgreSQL.")
+
+        content = path.read_text()
+        assert "Custom instructions here." in content
+        assert "Use PostgreSQL." in content
+        assert _GOVERNANCE_START in content
+        assert content.count("Use PostgreSQL.") == 1
+
+    def test_replaces_between_markers(self, tmp_path: Path) -> None:
+        """Existing governance section should be replaced, not appended."""
+        path = tmp_path / "CLAUDE.md"
+        path.write_text(
+            "# My Project\n\n"
+            f"{_GOVERNANCE_START}\nOLD RULES\n{_GOVERNANCE_END}\n\n"
+            "# Footer\n"
+        )
+
+        _write_root_claude_md(path, "NEW RULES")
+
+        content = path.read_text()
+        assert "OLD RULES" not in content
+        assert "NEW RULES" in content
+        assert "# My Project" in content
+        assert "# Footer" in content
+        assert content.count(_GOVERNANCE_START) == 1
+
+    def test_full_sync_idempotent(self, decisions: list[Decision], tmp_path: Path) -> None:
+        """Full sync_rules called twice should not duplicate CLAUDE.md content."""
+        config = GovernanceConfig(agents={"claude": True, "cursor": False})
+        (tmp_path / ".smm" / "generated").mkdir(parents=True)
+
+        sync_rules(decisions, tmp_path, config)
+        first = (tmp_path / "CLAUDE.md").read_text()
+
+        sync_rules(decisions, tmp_path, config)
+        second = (tmp_path / "CLAUDE.md").read_text()
+
+        assert first == second
+        assert second.count(_GOVERNANCE_START) == 1
+
+    def test_full_sync_with_existing_claude_md(self, decisions: list[Decision], tmp_path: Path) -> None:
+        """Sync with existing CLAUDE.md should preserve user content."""
+        config = GovernanceConfig(agents={"claude": True, "cursor": False})
+        (tmp_path / ".smm" / "generated").mkdir(parents=True)
+
+        # User's existing CLAUDE.md
+        (tmp_path / "CLAUDE.md").write_text("# My Custom Rules\n\nDo not touch auth.\n")
+
+        sync_rules(decisions, tmp_path, config)
+        content = (tmp_path / "CLAUDE.md").read_text()
+
+        assert "My Custom Rules" in content
+        assert "Do not touch auth." in content
+        assert _GOVERNANCE_START in content
+        assert content.count(_GOVERNANCE_START) == 1
+
+
+class TestWriteRootAgentFile:
+    """Same marker logic for AGENTS.md."""
+
+    def test_new_file_has_markers(self, tmp_path: Path) -> None:
+        path = tmp_path / "AGENTS.md"
+        _write_root_agent_file(path, "# Agent Rules")
+
+        content = path.read_text()
+        assert _GOVERNANCE_START in content
+        assert _GOVERNANCE_END in content
+
+    def test_idempotent_no_duplication(self, tmp_path: Path) -> None:
+        path = tmp_path / "AGENTS.md"
+        rules = "# Agent Rules"
+
+        _write_root_agent_file(path, rules)
+        _write_root_agent_file(path, rules)
+
+        content = path.read_text()
+        assert content.count("Agent Rules") == 1
+        assert content.count(_GOVERNANCE_START) == 1

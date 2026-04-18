@@ -1,0 +1,23 @@
+{
+  "id": "c8a2cef0-8094-4857-8baa-84b49dc56f3b",
+  "title": "Detected: HTTP Server (stdlib)",
+  "content": "This project uses http server (stdlib) via http.server and socketserver. Do not introduce Flask, FastAPI, Django, external web frameworks without explicit approval.",
+  "rationale": "Auto-detected from project scan. Evidence: import:http.server, import:socketserver",
+  "status": "active",
+  "decision_type": "constraint",
+  "dimensions": [
+    "api-style"
+  ],
+  "constraints": [
+    "This project uses http server (stdlib) via http.server and socketserver. Do not introduce Flask, FastAPI, Django, external web frameworks without explicit approval."
+  ],
+  "alternatives": [],
+  "made_by": "vt-init",
+  "project": "vt-protocol",
+  "source_type": "scan",
+  "confidence": 0.5,
+  "supersedes": null,
+  "session_id": null,
+  "created_at": "2026-04-14T06:51:11.949097Z",
+  "valid": true
+}
