@@ -1,6 +1,17 @@
 # Axiom Protocol
 
+**Status:** Working CLI · ~2,900 tests passing · MCP integration tested with Claude Code · RFC 6962 Merkle audit log verified end-to-end · Pre-1.0, APIs may change.
+
 **Governance for AI coding agents. Decisions tracked, contradictions caught, assumptions surfaced — before they ship.**
+
+## See it in action
+
+- 📺 **7-minute demo video:** https://youtu.be/IBbo51YOhdc
+- 📄 **Pitch deck:** https://drive.google.com/file/d/1tdKbBB4BWF_qGv7tCMM3B6-z5IylvmeF/view?usp=sharing
+
+## Why this exists
+
+Axiom started from a pattern I kept seeing in production. AI coding agents were compressing two-year build cycles into two months — but bug rates multiplied 10x and architectural decisions stopped being legible. Developers would say "Claude did this, we don't know why." In a separate system, an AI collections bot operated outside its policy scope — used data it shouldn't have, called customers it shouldn't have. Both failures had the same root cause: agents acting without a system of record. Axiom is that system.
 
 ---
 
@@ -13,10 +24,11 @@ Axiom Protocol makes every architectural decision explicit, detects contradictio
 ## 30-Second Quick Start
 
 ```bash
-pip install vt-protocol
-```
+# Install from source (PyPI release coming soon)
+git clone https://github.com/varunajaytawde28-design/axiom-protocol.git
+cd axiom-protocol
+pip install -e .
 
-```bash
 # Initialize governance in your project
 vt init
 
@@ -64,22 +76,17 @@ Assumptions follow a lifecycle: **detected → proposed → validated/rejected/d
 
 ## Dashboard
 
-Start with `vt dashboard` (runs on `127.0.0.1:7842`). Single-page app, no build step.
+Run `vt dashboard` to launch the local web UI on `127.0.0.1:7842`. It shows the decision graph, unresolved contradictions, the assumption validation queue, and the full audit trail.
 
-**[SCREENSHOT PLACEHOLDER — Decisions view]**
-Decision list with dimension filters, confidence scores, and status indicators. Click any decision to see its full rationale, related decisions, and linked contradictions.
+The audit trail includes a "Verify Merkle" action that re-runs RFC 6962 inclusion proofs against the current Merkle root and reports the result inline — `Verified N of N audit entries against Merkle root — RFC 6962 inclusion proofs passed. Audit log is tamper-evident.`
 
-**[SCREENSHOT PLACEHOLDER — Contradiction resolution]**
-Unresolved contradictions with side-by-side evidence from both decisions. Resolution buttons: pick winner, accept exception, dismiss, or defer.
+See the [demo video](https://youtu.be/IBbo51YOhdc) for a walkthrough.
 
-**[SCREENSHOT PLACEHOLDER — Assumption validation]**
-Multiple-choice questions generated from detected assumptions. Validate, reject, or defer each one with business context.
+---
 
-**[SCREENSHOT PLACEHOLDER — Decision graph]**
-Force-directed graph visualization (Cytoscape.js) showing decision nodes, contradiction edges, and dimension clusters.
+## Who this is for
 
-**[SCREENSHOT PLACEHOLDER — Audit trail]**
-Full event timeline: decisions added, contradictions detected, resolutions applied, agent sessions, LLM calls with token counts and cost.
+Axiom is built for engineering teams running AI coding agents (Claude Code, Cursor, Copilot) on production codebases — especially teams of 5–50 developers where multiple agents touch the same code and architectural drift is starting to show. If you've ever asked "why did the agent pick this database?" or shipped a contradiction between two agent sessions, this is for you.
 
 ---
 
@@ -178,6 +185,7 @@ Test markers: `integration`, `adversarial`, `performance`, `chaos`, `compliance`
 - **LLM-dependent contradiction detection.** Without an `ANTHROPIC_API_KEY`, contradiction detection falls back to the NLI model (if installed) or defaults to "compatible." The full pipeline requires an API key.
 - **No multi-repo support.** Governance is per-project. Cross-repo architectural decisions aren't tracked.
 - **Regex-based assumption detection.** Assumptions are found via pattern matching, not static analysis. This means false positives on some patterns and missed assumptions that don't match any regex.
+- **Brand transition in progress.** The CLI command is `vt` and the package is `vt-protocol` for historical reasons; the product is Axiom Protocol. These will be unified in a future release.
 
 ---
 
